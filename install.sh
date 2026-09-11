@@ -6,6 +6,8 @@ set -u
 # Constants
 # ------------------------------------------------------------------------------
 
+SCRIPT_VERSION="v0.1.0"
+
 BASE_DIR="${HOME}/hermes-manager"
 CONFIG_FILE="${BASE_DIR}/config.env"
 
@@ -48,10 +50,28 @@ BOLD="$(printf '\033[1m')"
 NC="$(printf '\033[0m')"
 
 # ------------------------------------------------------------------------------
+# Version
+# ------------------------------------------------------------------------------
+
+get_version() {
+    if command -v git >/dev/null 2>&1 && git -C "$BASE_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        git -C "$BASE_DIR" describe --tags --always 2>/dev/null || printf '%s' "$SCRIPT_VERSION"
+    else
+        printf '%s' "$SCRIPT_VERSION"
+    fi
+}
+
+# ------------------------------------------------------------------------------
 # Banner
 # ------------------------------------------------------------------------------
 
 render_banner() {
+    version="$(get_version)"
+    author_url="https://github.com/WhoisNeon/Daytona-Hermes"
+
+    link_start="\033]8;;${author_url}\033\\"
+    link_end="\033]8;;\033\\"
+
     printf '%s%s\n' "$CYAN" "$BOLD"
     printf '  _   _                                    _                    _   \n'
     printf ' | | | | ___ _ __ _ __ ___   ___  ___     / \\   __ _  ___ _ __ | |_ \n'
@@ -60,7 +80,8 @@ render_banner() {
     printf ' |_| |_|\\___|_|  |_| |_| |_|\\___||___/ /_/   \\_\\__, |\\___|_| |_|\\__|\n'
     printf '                                               |___/                \n'
     printf '\n'
-    printf '       Daytona Sandbox Edition • By @WhoisNeon\n'
+    printf '       Daytona Sandbox Edition • By %bWhoisNeon%b • %s\n' \
+        "$link_start" "$link_end" "$version"
     printf '%s\n' "$NC"
 }
 
