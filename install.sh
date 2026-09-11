@@ -241,6 +241,10 @@ container_running() {
         grep -Fxq "$1"
 }
 
+get_container_ip() {
+    docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1" 2>/dev/null || true
+}
+
 # ------------------------------------------------------------------------------
 # Status
 # ------------------------------------------------------------------------------
@@ -295,8 +299,11 @@ render_status() {
         printf '  9Router port:              %s%s%s\n' \
             "$CYAN" "$NINEROUTER_PORT" "$NC"
 
-        printf '  9Router local URL:         %shttp://localhost:%s%s\n' \
-            "$CYAN" "$NINEROUTER_PORT" "$NC"
+        router_ip="$(get_container_ip "$NINEROUTER_CONTAINER")"
+        router_host="${router_ip:-localhost}"
+
+        printf '  9Router local URL:         %shttp://%s:%s%s\n' \
+            "$CYAN" "$router_host" "$NINEROUTER_PORT" "$NC"
 
         printf '  9Router public URL:        %shttps://%s-%s.proxy.daytona.work%s\n' \
             "$CYAN" "$NINEROUTER_PORT" "$daytona_id" "$NC"
@@ -617,17 +624,20 @@ install_9router() {
         printf '%s[✓] 9Router is running.%s\n\n' \
             "$GREEN" "$NC"
 
+        router_ip="$(get_container_ip "$NINEROUTER_CONTAINER")"
+        router_host="${router_ip:-localhost}"
+
         printf '  Dashboard:\n'
-        printf '  %shttp://localhost:%s%s\n\n' \
-            "$CYAN" "$NINEROUTER_PORT" "$NC"
+        printf '  %shttp://%s:%s%s\n\n' \
+            "$CYAN" "$router_host" "$NINEROUTER_PORT" "$NC"
 
         printf '  Daytona public URL:\n'
         printf '  %shttps://%s-%s.proxy.daytona.work%s\n\n' \
             "$CYAN" "$NINEROUTER_PORT" "$daytona_id" "$NC"
 
         printf '  OpenAI-compatible API:\n'
-        printf '  %shttp://localhost:%s/v1%s\n' \
-            "$CYAN" "$NINEROUTER_PORT" "$NC"
+        printf '  %shttp://%s:%s/v1%s\n' \
+            "$CYAN" "$router_host" "$NINEROUTER_PORT" "$NC"
         printf '  %shttps://%s-%s.proxy.daytona.work/v1%s\n' \
             "$CYAN" "$NINEROUTER_PORT" "$daytona_id" "$NC"
     else
