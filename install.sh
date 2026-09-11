@@ -183,15 +183,18 @@ render_status() {
   local public_url="https://${NINEROUTER_PORT}-${uuid}.proxy.daytona.work"
 
   echo -e "${BOLD}Component Status:${NC}"
+  echo
   echo -e "  Hermes installed:          ${hermes_installed}"
   echo -e "  Hermes API endpoint:       ${CYAN}${HERMES_BASE_URL:-Not set}${NC}"
   echo -e "  Hermes API token:          ${CYAN}$(redact_secret "${HERMES_API_KEY}")${NC}"
   echo -e "  Telegram bot token:        ${CYAN}$(redact_secret "${TELEGRAM_BOT_TOKEN}")${NC}"
   echo -e "  Allowed users:             ${CYAN}${TELEGRAM_ALLOWED_USERS:-Not set}${NC}"
+  echo
   echo -e "  9Router installed:         ${router_installed}"
   echo -e "  9Router port:              ${CYAN}${NINEROUTER_PORT}${NC}"
   echo -e "  9Router local URL:         ${CYAN}${local_url}${NC}"
   echo -e "  9Router public URL:        ${CYAN}${public_url}${NC}"
+  echo
 }
 
 install_hermes() {
@@ -419,13 +422,16 @@ while true; do
   render_banner
   render_status
   echo -e "${CYAN}--------------------------------------------------------${NC}"
+  echo
   echo "1. Install Hermes"
   echo "2. Install 9Router"
   echo "3. Set Hermes API endpoint and API token"
   echo "4. Set Hermes Telegram bot token and allowed users"
   echo "5. Show Hermes configuration"
   echo "6. Exit"
+  echo
   echo -e "${CYAN}--------------------------------------------------------${NC}"
+  echo
   read -rp "Select an option [1-6]: " choice
 
   case "$choice" in
