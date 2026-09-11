@@ -26,6 +26,15 @@ mkdir -p "$HERMES_DATA_DIR"
 mkdir -p "$NINEROUTER_DATA_DIR"
 
 # ------------------------------------------------------------------------------
+# Screen & Terminal Helpers
+# ------------------------------------------------------------------------------
+
+clear_screen() {
+    printf '\033[2J\033[H'
+    clear 2>/dev/null || true
+}
+
+# ------------------------------------------------------------------------------
 # Colors
 # ------------------------------------------------------------------------------
 
@@ -73,8 +82,6 @@ redact_secret() {
         return
     fi
 
-    # Telegram:
-    # 123456789:ABCDEF...
     case "$value" in
         *:*)
             bot_id="${value%%:*}"
@@ -246,10 +253,13 @@ render_status() {
         hermes_status="${RED}Not installed${NC}"
     fi
 
+    is_router_installed=0
     if container_running "$NINEROUTER_CONTAINER"; then
         router_status="${GREEN}Running${NC}"
+        is_router_installed=1
     elif container_exists "$NINEROUTER_CONTAINER"; then
         router_status="${YELLOW}Stopped${NC}"
+        is_router_installed=1
     else
         router_status="${RED}Not installed${NC}"
     fi
@@ -276,14 +286,17 @@ render_status() {
 
     printf '  9Router:                   %s\n' "$router_status"
 
-    printf '  9Router port:              %s%s%s\n' \
-        "$CYAN" "$NINEROUTER_PORT" "$NC"
+    # Only show port and URLs if 9Router is installed
+    if [ "$is_router_installed" -eq 1 ]; then
+        printf '  9Router port:              %s%s%s\n' \
+            "$CYAN" "$NINEROUTER_PORT" "$NC"
 
-    printf '  9Router local URL:         %shttp://localhost:%s%s\n' \
-        "$CYAN" "$NINEROUTER_PORT" "$NC"
+        printf '  9Router local URL:         %shttp://localhost:%s%s\n' \
+            "$CYAN" "$NINEROUTER_PORT" "$NC"
 
-    printf '  9Router public URL:        %shttps://%s-%s.proxy.daytona.work%s\n' \
-        "$CYAN" "$NINEROUTER_PORT" "$daytona_id" "$NC"
+        printf '  9Router public URL:        %shttps://%s-%s.proxy.daytona.work%s\n' \
+            "$CYAN" "$NINEROUTER_PORT" "$daytona_id" "$NC"
+    fi
 
     printf '\n'
 }
@@ -365,7 +378,8 @@ EOF
 # ------------------------------------------------------------------------------
 
 install_hermes() {
-    printf '\n%s--- Install Hermes ---%s\n\n' "$BOLD" "$NC"
+    clear_screen
+    printf '%s--- Install Hermes ---%s\n\n' "$BOLD" "$NC"
 
     if ! ensure_docker; then
         return
@@ -465,8 +479,9 @@ configure_hermes_inside_container() {
     printf '%s[*] Applying Hermes model configuration...%s\n' \
         "$BLUE" "$NC"
 
+    # Set provider to openai-api
     docker exec "$HERMES_CONTAINER" \
-        hermes config set model.provider custom \
+        hermes config set model.provider openai-api \
         >/dev/null 2>&1 || true
 
     docker exec "$HERMES_CONTAINER" \
@@ -475,6 +490,14 @@ configure_hermes_inside_container() {
 
     docker exec "$HERMES_CONTAINER" \
         hermes config set model.api_key "$HERMES_API_TOKEN" \
+        >/dev/null 2>&1 || true
+
+    docker exec "$HERMES_CONTAINER" \
+        hermes config set env.OPENAI_BASE_URL "$HERMES_API_URL" \
+        >/dev/null 2>&1 || true
+
+    docker exec "$HERMES_CONTAINER" \
+        hermes config set env.OPENAI_API_KEY "$HERMES_API_TOKEN" \
         >/dev/null 2>&1 || true
 
     docker exec "$HERMES_CONTAINER" \
@@ -487,7 +510,8 @@ configure_hermes_inside_container() {
 # ------------------------------------------------------------------------------
 
 install_9router() {
-    printf '\n%s--- Install / Reconfigure 9Router ---%s\n\n' \
+    clear_screen
+    printf '%s--- Install / Reconfigure 9Router ---%s\n\n' \
         "$BOLD" "$NC"
 
     if ! ensure_docker; then
@@ -606,7 +630,8 @@ install_9router() {
 # ------------------------------------------------------------------------------
 
 set_hermes_api() {
-    printf '\n%s--- Hermes API Configuration ---%s\n\n' \
+    clear_screen
+    printf '%s--- Hermes API Configuration ---%s\n\n' \
         "$BOLD" "$NC"
 
     load_config
@@ -637,6 +662,13 @@ set_hermes_api() {
 
     write_hermes_env_if_exists
 
+    if container_running "$HERMES_CONTAINER"; then
+        printf '%s[*] Restarting Hermes container to apply new environment variables...%s\n' \
+            "$BLUE" "$NC"
+        docker restart "$HERMES_CONTAINER" >/dev/null 2>&1
+        sleep 2
+    fi
+
     configure_hermes_inside_container
 
     printf '\n%s[✓] Hermes API configuration saved.%s\n' \
@@ -656,7 +688,8 @@ write_hermes_env_if_exists() {
 # ------------------------------------------------------------------------------
 
 set_telegram() {
-    printf '\n%s--- Hermes Telegram Configuration ---%s\n\n' \
+    clear_screen
+    printf '%s--- Hermes Telegram Configuration ---%s\n\n' \
         "$BOLD" "$NC"
 
     load_config
@@ -705,7 +738,8 @@ set_telegram() {
 # ------------------------------------------------------------------------------
 
 show_hermes_config() {
-    printf '\n%s================ Hermes Configuration ================%s\n\n' \
+    clear_screen
+    printf '%s================ Hermes Configuration ================%s\n\n' \
         "$BOLD" "$NC"
 
     load_config
@@ -751,7 +785,8 @@ show_hermes_config() {
 # ------------------------------------------------------------------------------
 
 show_logs() {
-    printf '\n%s--- Container Logs ---%s\n\n' "$BOLD" "$NC"
+    clear_screen
+    printf '%s--- Container Logs ---%s\n\n' "$BOLD" "$NC"
 
     printf '1. Hermes\n'
     printf '2. 9Router\n'
@@ -774,11 +809,11 @@ show_logs() {
 }
 
 # ------------------------------------------------------------------------------
-# Main Menu
+# Main Menu Loop
 # ------------------------------------------------------------------------------
 
 while true; do
-    clear 2>/dev/null || true
+    clear_screen
 
     render_banner
     render_status
@@ -789,10 +824,13 @@ while true; do
     printf '\n'
     printf '1. Install / Reinstall Hermes\n'
     printf '2. Install / Reconfigure 9Router\n'
+    printf '\n'
     printf '3. Set Hermes API endpoint and token\n'
     printf '4. Set Hermes Telegram bot token and allowed users\n'
+    printf '\n'
     printf '5. Show Hermes configuration\n'
     printf '6. Show container logs\n'
+    printf '\n'
     printf '7. Exit\n'
 
     printf '\n%s--------------------------------------------------------%s\n\n' \
