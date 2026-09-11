@@ -61,7 +61,7 @@ Status
   9Router local URL:         http://<CONTAINER_IP>:20128
   9Router public URL:        https://20128-<SANDBOX_ID>.proxy.daytona.work
 
---------------------------------------------------------
+───────────────────────────────────────────────────────────────────────────
 
 1. Install / Reinstall Hermes
 2. Install / Reconfigure 9Router
@@ -76,7 +76,7 @@ Status
 
 0. Exit
 
---------------------------------------------------------
+───────────────────────────────────────────────────────────────────────────
 ```
 
 ### Options Breakdown
