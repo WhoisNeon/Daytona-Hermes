@@ -43,16 +43,14 @@ NC="$(printf '\033[0m')"
 
 render_banner() {
     printf '%s%s\n' "$CYAN" "$BOLD"
-    cat <<'BANNER_EOF'
-  _    _                                   ___  _____
- | |  | |                                 / _ \|  _  |
- | |__| | ___ _ __ _ __ ___   ___  ___   / /_\ \ |_/ /
- |  __  |/ _ \ '__| '_ \ _ \ / _ \/ __|  |  _  |  __/
- | |  | |  __/ |  | | | | | |  __/\__ \  | | | | |
- |_|  |_|\___|_|  |_| |_| |_|\___||___/  \_| |_/\_|
-
-       Daytona Sandbox Edition • By @WhoisNeon
-BANNER_EOF
+    printf '  _    _                                   ___  _____\n'
+    printf ' | |  | |                                 / _ \\|  _  |\n'
+    printf ' | |__| | ___ _ __ _ __ ___   ___  ___   / /_\\ \\ |_/ /\n'
+    printf ' |  __  |/ _ \\ '\''__| '\''_ \\ _ \\ / _ \\/ __|  |  _  |  __/\n'
+    printf ' | |  | |  __/ |  | | | | | |  __/\\__ \\  | | | | |\n'
+    printf ' |_|  |_|\\___|_|  |_| |_| |_|\\___||___/  \\_| |_/\\_|\n'
+    printf '\n'
+    printf '       Daytona Sandbox Edition • By @WhoisNeon\n'
     printf '%s\n' "$NC"
 }
 
