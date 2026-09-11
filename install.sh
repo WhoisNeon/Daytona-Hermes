@@ -922,6 +922,7 @@ while true; do
     printf '\n'
     printf '5. Show Hermes configuration\n'
     printf '6. Show container logs\n'
+    printf '\n'
     printf '7. Execute command inside container\n'
     printf '\n'
     printf '0. Exit\n'

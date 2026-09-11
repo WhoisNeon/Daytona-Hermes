@@ -45,7 +45,7 @@ Upon launch, `install.sh` displays the dynamic ASCII banner alongside a real-tim
  |_| |_|\___|_|  |_| |_| |_|\___||___/ /_/   \_\__, |\___|_| |_|\__|
                                                |___/                
 
-       Daytona Sandbox Edition • By @WhoisNeon
+       Daytona Sandbox Edition • By WhoisNeon • v1.x.x
 
 Status
 
@@ -71,6 +71,7 @@ Status
 
 5. Show Hermes configuration
 6. Show container logs
+
 7. Execute command inside container
 
 0. Exit
