@@ -20,6 +20,7 @@ NINEROUTER_CONTAINER="9router"
 
 NINEROUTER_IMAGE="ghcr.io/neon-2026/9router:usage-backup"
 DEFAULT_NINEROUTER_PORT="20128"
+DEFAULT_NINEROUTER_PASSWORD="123456"
 
 mkdir -p "$BASE_DIR"
 mkdir -p "$HERMES_DATA_DIR"
@@ -150,6 +151,7 @@ load_config() {
     TELEGRAM_ALLOWED_USERS=""
     HERMES_MODEL="mimo-v2.5-free"
     NINEROUTER_PORT="$DEFAULT_NINEROUTER_PORT"
+    NINEROUTER_PASSWORD="$DEFAULT_NINEROUTER_PASSWORD"
 
     if [ -f "$CONFIG_FILE" ]; then
         # shellcheck disable=SC1090
@@ -167,6 +169,7 @@ TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN}"
 TELEGRAM_ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS}"
 HERMES_MODEL="${HERMES_MODEL}"
 NINEROUTER_PORT="${NINEROUTER_PORT}"
+NINEROUTER_PASSWORD="${NINEROUTER_PASSWORD}"
 EOF
 
     chmod 600 "$CONFIG_FILE"
@@ -520,7 +523,7 @@ install_9router() {
         printf '%s[!] 9Router already exists.%s\n\n' "$YELLOW" "$NC"
 
         printf '1. Restart\n'
-        printf '2. Reinstall\n'
+        printf '2. Reinstall / Reconfigure\n'
         printf '0. Cancel\n\n'
 
         printf 'Select [0-2]: '
@@ -568,6 +571,13 @@ install_9router() {
         return
     fi
 
+    printf 'Enter 9Router password [default: %s]: ' "$NINEROUTER_PASSWORD"
+    read -r requested_password
+
+    if [ -n "$requested_password" ]; then
+        NINEROUTER_PASSWORD="$requested_password"
+    fi
+
     save_config
 
     printf '%s[*] Pulling 9Router image...%s\n' "$BLUE" "$NC"
@@ -588,6 +598,7 @@ install_9router() {
         -e DATA_DIR=/app/data \
         -e PORT=20128 \
         -e HOSTNAME=0.0.0.0 \
+        -e INITIAL_PASSWORD="$NINEROUTER_PASSWORD" \
         "$NINEROUTER_IMAGE"; then
 
         printf '%s[✗] Failed to start 9Router.%s\n' \
@@ -615,6 +626,8 @@ install_9router() {
         printf '  OpenAI-compatible API:\n'
         printf '  %shttp://localhost:%s/v1%s\n' \
             "$CYAN" "$NINEROUTER_PORT" "$NC"
+        printf '  %shttps://%s-%s.proxy.daytona.work/v1%s\n' \
+            "$CYAN" "$NINEROUTER_PORT" "$daytona_id" "$NC"
     else
         printf '%s[✗] 9Router stopped after startup.%s\n' \
             "$RED" "$NC"
