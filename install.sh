@@ -286,7 +286,6 @@ render_status() {
 
     printf '  9Router:                   %s\n' "$router_status"
 
-    # Only show port and URLs if 9Router is installed
     if [ "$is_router_installed" -eq 1 ]; then
         printf '  9Router port:              %s%s%s\n' \
             "$CYAN" "$NINEROUTER_PORT" "$NC"
@@ -390,9 +389,9 @@ install_hermes() {
 
         printf '1. Restart\n'
         printf '2. Rebuild\n'
-        printf '3. Cancel\n\n'
+        printf '0. Cancel\n\n'
 
-        printf 'Select [1-3]: '
+        printf 'Select [0-2]: '
         read -r option
 
         case "$option" in
@@ -404,7 +403,7 @@ install_hermes() {
             2)
                 docker rm -f "$HERMES_CONTAINER" >/dev/null 2>&1 || true
                 ;;
-            *)
+            0|*)
                 return
                 ;;
         esac
@@ -479,7 +478,6 @@ configure_hermes_inside_container() {
     printf '%s[*] Applying Hermes model configuration...%s\n' \
         "$BLUE" "$NC"
 
-    # Set provider to openai-api
     docker exec "$HERMES_CONTAINER" \
         hermes config set model.provider openai-api \
         >/dev/null 2>&1 || true
@@ -523,9 +521,9 @@ install_9router() {
 
         printf '1. Restart\n'
         printf '2. Reinstall\n'
-        printf '3. Cancel\n\n'
+        printf '0. Cancel\n\n'
 
-        printf 'Select [1-3]: '
+        printf 'Select [0-2]: '
         read -r option
 
         case "$option" in
@@ -541,7 +539,7 @@ install_9router() {
                 docker rm -f "$NINEROUTER_CONTAINER" \
                     >/dev/null 2>&1 || true
                 ;;
-            *)
+            0|*)
                 return
                 ;;
         esac
@@ -790,9 +788,9 @@ show_logs() {
 
     printf '1. Hermes\n'
     printf '2. 9Router\n'
-    printf '3. Cancel\n\n'
+    printf '0. Cancel\n\n'
 
-    printf 'Select [1-3]: '
+    printf 'Select [0-2]: '
     read -r option
 
     case "$option" in
@@ -802,10 +800,50 @@ show_logs() {
         2)
             docker logs --tail 100 "$NINEROUTER_CONTAINER" 2>&1
             ;;
-        *)
+        0|*)
             return
             ;;
     esac
+}
+
+# ------------------------------------------------------------------------------
+# Execute Command in Container
+# ------------------------------------------------------------------------------
+
+exec_in_container() {
+    clear_screen
+    printf '%s--- Execute Command in Container ---%s\n\n' "$BOLD" "$NC"
+
+    printf '1. Hermes\n'
+    printf '2. 9Router\n'
+    printf '0. Cancel\n\n'
+
+    printf 'Select [0-2]: '
+    read -r target_option
+
+    case "$target_option" in
+        1) target_container="$HERMES_CONTAINER" ;;
+        2) target_container="$NINEROUTER_CONTAINER" ;;
+        0|*) return ;;
+    esac
+
+    if ! container_running "$target_container"; then
+        printf '\n%s[✗] Container %s is not running.%s\n' "$RED" "$target_container" "$NC"
+        return
+    fi
+
+    printf '\nEnter command to run (Leave empty to open an interactive shell): '
+    read -r cmd_to_run
+
+    if [ -z "$cmd_to_run" ]; then
+        if docker exec -it "$target_container" which bash >/dev/null 2>&1; then
+            docker exec -it "$target_container" bash
+        else
+            docker exec -it "$target_container" sh
+        fi
+    else
+        docker exec -it "$target_container" sh -c "$cmd_to_run"
+    fi
 }
 
 # ------------------------------------------------------------------------------
@@ -830,13 +868,14 @@ while true; do
     printf '\n'
     printf '5. Show Hermes configuration\n'
     printf '6. Show container logs\n'
+    printf '7. Execute command inside container\n'
     printf '\n'
-    printf '7. Exit\n'
+    printf '0. Exit\n'
 
     printf '\n%s--------------------------------------------------------%s\n\n' \
         "$CYAN" "$NC"
 
-    printf 'Select an option [1-7]: '
+    printf 'Select an option [0-7]: '
     read -r choice
 
     case "$choice" in
@@ -846,7 +885,8 @@ while true; do
         4) set_telegram ;;
         5) show_hermes_config ;;
         6) show_logs ;;
-        7) printf '%sExiting.%s\n' "$GREEN" "$NC"; exit 0 ;;
+        7) exec_in_container ;;
+        0) printf '%sExiting.%s\n' "$GREEN" "$NC"; exit 0 ;;
         *) printf '%s[✗] Invalid option.%s\n' "$RED" "$NC" ;;
     esac
 
