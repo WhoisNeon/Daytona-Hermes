@@ -18,7 +18,7 @@ HERMES_REPO_DIR="${BASE_DIR}/hermes-railway-template"
 HERMES_CONTAINER="hermes"
 NINEROUTER_CONTAINER="9router"
 
-NINEROUTER_IMAGE="ghcr.io/neon-2026/9router:usage-backup"
+NINEROUTER_IMAGE="ghcr.io/whoisneon/9router:latest"
 DEFAULT_NINEROUTER_PORT="20128"
 DEFAULT_NINEROUTER_PASSWORD="123456"
 
@@ -53,12 +53,12 @@ NC="$(printf '\033[0m')"
 
 render_banner() {
     printf '%s%s\n' "$CYAN" "$BOLD"
-    printf '  _    _                                   ___  _____\n'
-    printf ' | |  | |                                 / _ \\|  _  |\n'
-    printf ' | |__| | ___ _ __ _ __ ___   ___  ___   / /_\\ \\ |_/ /\n'
-    printf ' |  __  |/ _ \\ '\''__| '\''_ \\ _ \\ / _ \\/ __|  |  _  |  __/\n'
-    printf ' | |  | |  __/ |  | | | | | |  __/\\__ \\  | | | | |\n'
-    printf ' |_|  |_|\\___|_|  |_| |_| |_|\\___||___/  \\_| |_/\\_|\n'
+    printf '  _   _                                    _                    _   \n'
+    printf ' | | | | ___ _ __ _ __ ___   ___  ___     / \\   __ _  ___ _ __ | |_ \n'
+    printf ' | |_| |/ _ \\ '\''__| '\''_ ` _ \\ / _ \\/ __|   / _ \\ / _` |/ _ \\ '\''_ \\| __|\n'
+    printf ' |  _  |  __/ |  | | | | | |  __/\\__ \\  / ___ \\ (_| |  __/ | | | |_ \n'
+    printf ' |_| |_|\\___|_|  |_| |_| |_|\\___||___/ /_/   \\_\\__, |\\___|_| |_|\\__|\n'
+    printf '                                               |___/                \n'
     printf '\n'
     printf '       Daytona Sandbox Edition • By @WhoisNeon\n'
     printf '%s\n' "$NC"
@@ -279,6 +279,8 @@ render_status() {
     printf '  Hermes API token:          %s%s%s\n' \
         "$CYAN" "$(redact_secret "${HERMES_API_TOKEN:-}")" "$NC"
 
+    printf '\n'
+    
     printf '  Telegram bot token:        %s%s%s\n' \
         "$CYAN" "$(redact_secret "${TELEGRAM_BOT_TOKEN:-}")" "$NC"
 
