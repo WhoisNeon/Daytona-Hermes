@@ -280,7 +280,7 @@ render_status() {
         "$CYAN" "$(redact_secret "${HERMES_API_TOKEN:-}")" "$NC"
 
     printf '\n'
-    
+
     printf '  Telegram bot token:        %s%s%s\n' \
         "$CYAN" "$(redact_secret "${TELEGRAM_BOT_TOKEN:-}")" "$NC"
 
@@ -847,23 +847,14 @@ exec_in_container() {
         return
     fi
 
-    printf '\n%sConnected to %s. Type "exitnow" to return to the menu.%s\n\n' "$CYAN" "$target_container" "$NC"
+    printf '\n%sOpening interactive shell in %s. Type "exit" to return to menu.%s\n\n' "$CYAN" "$target_container" "$NC"
 
-    while true; do
-        printf '%s%s> %s' "$BOLD" "$target_container" "$NC"
-        read -r cmd_to_run
-
-        if [ "$cmd_to_run" = "exitnow" ]; then
-            break
-        fi
-
-        if [ -z "$cmd_to_run" ]; then
-            continue
-        fi
-
-        docker exec -it "$target_container" sh -c "$cmd_to_run"
-        printf '\n'
-    done
+    # Prefer bash for full readline/arrow support; fall back to sh
+    if docker exec "$target_container" which bash >/dev/null 2>&1; then
+        docker exec -it "$target_container" bash
+    else
+        docker exec -it "$target_container" sh
+    fi
 }
 
 # ------------------------------------------------------------------------------
