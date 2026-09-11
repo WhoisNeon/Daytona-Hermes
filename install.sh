@@ -639,6 +639,36 @@ install_9router() {
 }
 
 # ------------------------------------------------------------------------------
+# Hermes Container Lifecycle Helper
+# ------------------------------------------------------------------------------
+
+recreate_hermes_container() {
+    if ! container_running "$HERMES_CONTAINER"; then
+        return 0
+    fi
+
+    printf '%s[*] Recreating Hermes container with updated environment variables...%s\n' \
+        "$BLUE" "$NC"
+
+    docker rm -f "$HERMES_CONTAINER" >/dev/null 2>&1 || true
+
+    if ! docker run -d \
+        --name "$HERMES_CONTAINER" \
+        --restart unless-stopped \
+        --env-file "${HERMES_REPO_DIR}/.env" \
+        -v "${HERMES_DATA_DIR}:/data" \
+        hermes-agent:latest >/dev/null 2>&1; then
+
+        printf '%s[✗] Failed to restart Hermes with new configuration.%s\n' "$RED" "$NC"
+        return 1
+    fi
+
+    sleep 3
+    configure_hermes_inside_container
+    return 0
+}
+
+# ------------------------------------------------------------------------------
 # Hermes API Settings
 # ------------------------------------------------------------------------------
 
@@ -672,19 +702,10 @@ set_hermes_api() {
     fi
 
     save_config
-
     write_hermes_env_if_exists
+    recreate_hermes_container
 
-    if container_running "$HERMES_CONTAINER"; then
-        printf '%s[*] Restarting Hermes container to apply new environment variables...%s\n' \
-            "$BLUE" "$NC"
-        docker restart "$HERMES_CONTAINER" >/dev/null 2>&1
-        sleep 2
-    fi
-
-    configure_hermes_inside_container
-
-    printf '\n%s[✓] Hermes API configuration saved.%s\n' \
+    printf '\n%s[✓] Hermes API configuration saved and applied.%s\n' \
         "$GREEN" "$NC"
 }
 
@@ -730,20 +751,11 @@ set_telegram() {
     fi
 
     save_config
-
     write_hermes_env_if_exists
+    recreate_hermes_container
 
-    if container_running "$HERMES_CONTAINER"; then
-        printf '%s[*] Restarting Hermes...%s\n' "$BLUE" "$NC"
-
-        docker restart "$HERMES_CONTAINER" >/dev/null 2>&1
-
-        printf '%s[✓] Telegram configuration applied.%s\n' \
-            "$GREEN" "$NC"
-    else
-        printf '%s[✓] Telegram configuration saved.%s\n' \
-            "$GREEN" "$NC"
-    fi
+    printf '\n%s[✓] Telegram configuration saved and applied.%s\n' \
+        "$GREEN" "$NC"
 }
 
 # ------------------------------------------------------------------------------
