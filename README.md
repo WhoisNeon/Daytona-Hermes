@@ -28,7 +28,7 @@ An interactive management CLI and deployment toolkit for orchestrating Hermes Ag
 Run the bootstrap command inside your Daytona sandbox terminal:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/WhoisNeon/Daytona-Hermes/main/install.sh | sh
+wget -qO install.sh "https://raw.githubusercontent.com/WhoisNeon/Daytona-Hermes/main/install.sh?$(date +%s)" && sh install.sh
 ```
 
 ---
