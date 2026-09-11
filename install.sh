@@ -1,24 +1,4 @@
-```sh
 #!/bin/sh
-# ==============================================================================
-# Hermes Agent + 9Router Daytona Environment Manager
-#
-# Designed for:
-#   docker:29.4-dind
-#   Alpine Linux
-#   Daytona Sandbox
-#
-# Requirements already available in docker:29.4-dind:
-#   sh
-#   wget
-#   tar
-#   docker / dockerd
-#
-# No bash
-# No curl
-# No git
-# No apt
-# ==============================================================================
 
 set -u
 
@@ -826,34 +806,16 @@ while true; do
     read -r choice
 
     case "$choice" in
-        1)
-            install_hermes
-            ;;
-        2)
-            install_9router
-            ;;
-        3)
-            set_hermes_api
-            ;;
-        4)
-            set_telegram
-            ;;
-        5)
-            show_hermes_config
-            ;;
-        6)
-            show_logs
-            ;;
-        7)
-            printf '%sExiting.%s\n' "$GREEN" "$NC"
-            exit 0
-            ;;
-        *)
-            printf '%s[✗] Invalid option.%s\n' "$RED" "$NC"
-            ;;
+        1) install_hermes ;;
+        2) install_9router ;;
+        3) set_hermes_api ;;
+        4) set_telegram ;;
+        5) show_hermes_config ;;
+        6) show_logs ;;
+        7) printf '%sExiting.%s\n' "$GREEN" "$NC"; exit 0 ;;
+        *) printf '%s[✗] Invalid option.%s\n' "$RED" "$NC" ;;
     esac
 
     printf '\nPress Enter to return to the menu...'
     read -r dummy
 done
-```
