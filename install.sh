@@ -832,18 +832,23 @@ exec_in_container() {
         return
     fi
 
-    printf '\nEnter command to run (Leave empty to open an interactive shell): '
-    read -r cmd_to_run
+    printf '\n%sConnected to %s. Type "exitnow" to return to the menu.%s\n\n' "$CYAN" "$target_container" "$NC"
 
-    if [ -z "$cmd_to_run" ]; then
-        if docker exec -it "$target_container" which bash >/dev/null 2>&1; then
-            docker exec -it "$target_container" bash
-        else
-            docker exec -it "$target_container" sh
+    while true; do
+        printf '%s%s> %s' "$BOLD" "$target_container" "$NC"
+        read -r cmd_to_run
+
+        if [ "$cmd_to_run" = "exitnow" ]; then
+            break
         fi
-    else
+
+        if [ -z "$cmd_to_run" ]; then
+            continue
+        fi
+
         docker exec -it "$target_container" sh -c "$cmd_to_run"
-    fi
+        printf '\n'
+    done
 }
 
 # ------------------------------------------------------------------------------
