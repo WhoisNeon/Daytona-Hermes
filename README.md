@@ -50,7 +50,7 @@ Upon launch, `install.sh` displays the dynamic ASCII banner alongside a real-tim
 Status
 
   Hermes:                    Running
-  Hermes API endpoint:       https://20128-sandbox-uuid.proxy.daytona.work/v1
+  Hermes API endpoint:       http://<CONTAINER_IP>:20128/v1
   Hermes API token:          sk-3•••••••••••••••••••••••••634f
 
   Telegram bot token:        123456789:AAa••••••••••••••••••••••••••••xyz
@@ -58,8 +58,8 @@ Status
 
   9Router:                   Running
   9Router port:              20128
-  9Router local URL:         http://localhost:20128
-  9Router public URL:        https://20128-sandbox-uuid.proxy.daytona.work
+  9Router local URL:         http://<CONTAINER_IP>:20128
+  9Router public URL:        https://20128-<SANDBOX_ID>.proxy.daytona.work
 
 --------------------------------------------------------
 
@@ -111,9 +111,9 @@ Status
 
 When 9Router is active, URLs resolve dynamically via local loopback and the resolved Daytona Sandbox identifier:
 
-* **Local Dashboard:** `http://localhost:<PORT>`
+* **Local Dashboard:** `http://<CONTAINER_IP>:<PORT>`
 
-* **Local API Base:** `http://localhost:<PORT>/v1`
+* **Local API Base:** `http://<CONTAINER_IP>:<PORT>/v1`
 
 * **Public Dashboard:** `https://<PORT>-<SANDBOX_ID>.proxy.daytona.work`
 
