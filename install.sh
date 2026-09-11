@@ -82,7 +82,7 @@ render_banner() {
     printf '\n'
     printf '       Daytona Sandbox Edition • By %bWhoisNeon%b • %s\n' \
         "$link_start" "$link_end" "$version"
-    printf '%s\n' "$NC"
+    printf '%s\n\n' "$NC"
 }
 
 # ------------------------------------------------------------------------------
@@ -293,6 +293,9 @@ render_status() {
     fi
 
     daytona_id="$(get_daytona_id)"
+
+    printf '%───────────────────────────────────────────────────────────────────────────%s\n' \
+        "$CYAN" "$NC"
 
     printf '%s%sStatus%s\n\n' "$BOLD" "$CYAN" "$NC"
 

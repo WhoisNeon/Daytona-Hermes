@@ -47,6 +47,8 @@ Upon launch, `install.sh` displays the dynamic ASCII banner alongside a real-tim
 
        Daytona Sandbox Edition • By WhoisNeon • v1.x.x
 
+───────────────────────────────────────────────────────────────────────────
+
 Status
 
   Hermes:                    Running
