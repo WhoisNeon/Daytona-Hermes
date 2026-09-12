@@ -82,7 +82,7 @@ render_banner() {
     printf '\n'
     printf '       Daytona Sandbox Edition • By %bWhoisNeon%b • %s\n' \
         "$link_start" "$link_end" "$version"
-    printf '%s\n\n' "$NC"
+    printf '%s\n' "$NC"
 }
 
 # ------------------------------------------------------------------------------
@@ -294,8 +294,8 @@ render_status() {
 
     daytona_id="$(get_daytona_id)"
 
-    printf '%───────────────────────────────────────────────────────────────────────────%s\n' \
-        "$CYAN" "$NC"
+    printf '%s───────────────────────────────────────────────────────────────────────────%s\n' \
+      "$CYAN" "$NC"
 
     printf '%s%sStatus%s\n\n' "$BOLD" "$CYAN" "$NC"
 
@@ -913,7 +913,7 @@ while true; do
     render_banner
     render_status
 
-    printf '%───────────────────────────────────────────────────────────────────────────%s\n' \
+    printf '%s───────────────────────────────────────────────────────────────────────────%s\n' \
         "$CYAN" "$NC"
 
     printf '\n'
@@ -930,7 +930,7 @@ while true; do
     printf '\n'
     printf '0. Exit\n'
 
-    printf '\n%───────────────────────────────────────────────────────────────────────────%s\n\n' \
+    printf '\n%s───────────────────────────────────────────────────────────────────────────%s\n\n' \
         "$CYAN" "$NC"
 
     printf 'Select an option [0-7]: '
