@@ -1,6 +1,6 @@
-# Hermes Agent & 9Router & FreeLLMAPI on Daytona
+# Hermes Agent & 9Router & FreeLLMAPI & Xray on Daytona
 
-An interactive management CLI and deployment toolkit for orchestrating Hermes Agent and 9Router inside a Daytona Docker-in-Docker (DinD) sandbox with Telegram gateway integration.
+An interactive management CLI and deployment toolkit for orchestrating Hermes Agent, 9Router, FreeLLMAPI and an Xray proxy core inside a Daytona Docker-in-Docker (DinD) sandbox with Telegram gateway integration.
 
 ---
 
@@ -11,6 +11,7 @@ An interactive management CLI and deployment toolkit for orchestrating Hermes Ag
 * **Telegram Gateway:** Direct two-way messaging channel with user ID whitelisting.
 * **9Router:** Local/public OpenAI-compatible API gateway and management dashboard.
 * **FreeLLMAPI:** Local/public OpenAI-compatible gateway aggregating 34+ free LLM providers (635+ model endpoints) behind one `/v1` endpoint with smart routing and automatic failover ([tashfeenahmed/freellmapi](https://github.com/tashfeenahmed/freellmapi)).
+* **Xray Proxy:** Dockerised Xray core that turns a `vless://`, `vmess://` or `trojan://` share link into a ready-to-use client config, with SOCKS (10808) and HTTP (10809) local inbounds plus a system-wide proxy toggle.
 * **TUI Console (`install.sh`):** Interactive terminal interface with live status checks, masked secrets, automated daemon recovery, log inspection, and Daytona proxy URL discovery.
 
 ---
@@ -69,6 +70,11 @@ Status
   FreeLLMAPI local URL:      http://<CONTAINER_IP>:3001
   FreeLLMAPI public URL:     https://3001-<SANDBOX_ID>.proxy.daytona.work
 
+  Xray core:                 Running
+  Xray system proxy:         Enabled
+  Xray node:                 My Reality Node
+  Xray SOCKS / HTTP:         socks5://127.0.0.1:10808 / http://127.0.0.1:10809
+
 ───────────────────────────────────────────────────────────────────────────
 
 1. Install / Reinstall Hermes
@@ -82,6 +88,8 @@ Status
 7. Show container logs
 
 8. Execute command inside container
+
+9. Xray proxy (node / system proxy / core / latency)
 
 0. Exit
 
@@ -114,9 +122,82 @@ Status
 * **8. Execute command inside container:** Drops into an interactive sub-shell execution loop inside either the `hermes`, `9router`, or `freellmapi` container (enter `exitnow` to return to the main menu).
 
 
+* **9. Xray proxy:** Opens the v2rayN-style proxy submenu described in [Xray Proxy](#xray-proxy).
+
+
 * **0. Exit:** Cleanly closes the management console.
 
 
+
+---
+
+## Xray Proxy
+
+Menu option `9` turns the sandbox into a proxy client. Paste a share link once and the
+script writes a standard Xray `config.json`, runs the core in Docker and wires up the
+system proxy.
+
+```text
+--- Xray Proxy ---
+
+  Core:          Running
+  System proxy:  Enabled
+  Node:          My Reality Node
+  SOCKS:         socks5://127.0.0.1:10808
+  HTTP:          http://127.0.0.1:10809
+
+1. Add / Change node link
+2. Pause / Resume system proxy
+
+3. Restart core
+4. Stop core
+5. Start core
+
+6. Test proxy latency
+7. Show Xray logs
+8. Show Xray client config
+
+0. Back
+```
+
+### Submenu Options
+
+* **1. Add / Change node link:** Prompts for a `vless://`, `vmess://` (Base64 JSON) or
+  `trojan://` share link, percent-decodes every parameter, shows a redacted summary for
+  confirmation, then writes `config.json`, recreates the container and enables the proxy.
+  Supported transports: `tcp` (including `headerType=http` obfuscation), `ws`, `grpc`,
+  `httpupgrade`, `xhttp` and `kcp`; supported security: `none`, `tls` and `reality`.
+* **2. Pause / Resume system proxy:** Toggles the environment variables only — the core
+  keeps running, so resuming is instant. Handy when you need direct connectivity
+  temporarily.
+* **3. / 4. / 5. Restart, Stop, Start core:** Container lifecycle control for the `xray`
+  container.
+* **6. Test proxy latency:** `curl` through `127.0.0.1:10809` to `google.com/generate_204`,
+  reporting total time in milliseconds, the HTTP status, the egress IP, and a direct
+  (no-proxy) baseline with the delta.
+* **7. / 8. Show logs / Show config:** Dumps the last 100 container log lines, or prints
+  the generated `config.json`.
+
+### How the Proxy Is Applied
+
+The variables are written in three places so they apply immediately *and* survive:
+
+* **Current session** — exported directly into the running `install.sh` process (and thus
+  into every command it spawns, such as `wget` and `curl`).
+* **`/etc/profile.d/hermes-xray-proxy.sh`** — picked up by every new login shell.
+* **`/etc/environment`** — picked up by PAM sessions. Existing proxy lines are filtered
+  out before rewriting so repeated toggles never leave stale duplicates behind.
+
+Because a child process cannot modify its parent's environment, apply the change to the
+terminal you are already sitting in with:
+
+```bash
+. /etc/profile.d/hermes-xray-proxy.sh    # enable
+rm /etc/profile.d/hermes-xray-proxy.sh   # disable (or open a new terminal)
+```
+
+Writing to `/etc` requires root. Without it the toggle still works for the current
+script session and the script prints a warning.
 
 ---
 
@@ -148,7 +229,16 @@ The script organizes runtime configurations and storage across several host loca
 * **FreeLLMAPI Storage (`${HOME}/hermes-manager/freellmapi-data`):** Mounted to `/app/server/data` to retain the SQLite database (provider keys, models, settings — encrypted at rest) across container recreations.
 
 
-* **CLI State (`${HOME}/hermes-manager/config.env`):** Saved with strict permissions (`0600`) to retain custom ports, passwords, the FreeLLMAPI encryption key, and model endpoint preferences across script sessions.
+* **Xray Config (`${HOME}/hermes-manager/xray-data/config.json`):** The generated Xray client configuration, bind-mounted read-only into the `xray` container at `/etc/xray/config.json`. Saved with strict permissions (`0600`) since it contains the node UUID/password.
+
+
+* **Xray Node Link (`${HOME}/hermes-manager/xray-data/node.link`):** The original share link, kept verbatim at `0600` so the exact node can be restored or re-applied later.
+
+
+* **Xray Proxy Script (`/etc/profile.d/hermes-xray-proxy.sh`):** Generated on demand when the system proxy is enabled and deleted again when it is paused. Its presence is what the dashboard reads to report `Enabled` vs `Disabled`.
+
+
+* **CLI State (`${HOME}/hermes-manager/config.env`):** Saved with strict permissions (`0600`) to retain custom ports, passwords, the FreeLLMAPI encryption key, the Xray node label, and model endpoint preferences across script sessions.
 
 
 
@@ -175,6 +265,12 @@ docker exec -it hermes sh
 
 ```
 
+
+
+* **Proxy Enabled but Traffic Is Broken:** The system proxy points at `127.0.0.1:10809` on the sandbox. If the core is stopped while the proxy is on, all proxied traffic fails. Use submenu option `2` to pause, or `5` to start the core.
+
+
+* **Node Shows "Not installed" or Curl Fails Immediately:** Inspect the generated file and the core logs with submenu options `8` and `7`. A REALITY node without its `pbk` parameter, or a link using the removed `h2`/`quic` transport, is rejected at parse time with a specific message.
 
 
 ---
