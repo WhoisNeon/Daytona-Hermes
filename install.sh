@@ -19,14 +19,20 @@ HERMES_REPO_DIR="${BASE_DIR}/hermes-railway-template"
 
 HERMES_CONTAINER="hermes"
 NINEROUTER_CONTAINER="9router"
+FREELLMAPI_CONTAINER="freellmapi"
 
 NINEROUTER_IMAGE="ghcr.io/whoisneon/9router:latest"
 DEFAULT_NINEROUTER_PORT="20128"
 DEFAULT_NINEROUTER_PASSWORD="123456"
 
+FREELLMAPI_DATA_DIR="${BASE_DIR}/freellmapi-data"
+FREELLMAPI_IMAGE="ghcr.io/tashfeenahmed/freellmapi:latest"
+DEFAULT_FREELLMAPI_PORT="3001"
+
 mkdir -p "$BASE_DIR"
 mkdir -p "$HERMES_DATA_DIR"
 mkdir -p "$NINEROUTER_DATA_DIR"
+mkdir -p "$FREELLMAPI_DATA_DIR"
 
 # ------------------------------------------------------------------------------
 # Screen & Terminal Helpers
@@ -173,6 +179,8 @@ load_config() {
     HERMES_MODEL="mimo-v2.5-free"
     NINEROUTER_PORT="$DEFAULT_NINEROUTER_PORT"
     NINEROUTER_PASSWORD="$DEFAULT_NINEROUTER_PASSWORD"
+    FREELLMAPI_PORT="$DEFAULT_FREELLMAPI_PORT"
+    FREELLMAPI_ENCRYPTION_KEY=""
 
     if [ -f "$CONFIG_FILE" ]; then
         # shellcheck disable=SC1090
@@ -191,6 +199,8 @@ TELEGRAM_ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS}"
 HERMES_MODEL="${HERMES_MODEL}"
 NINEROUTER_PORT="${NINEROUTER_PORT}"
 NINEROUTER_PASSWORD="${NINEROUTER_PASSWORD}"
+FREELLMAPI_PORT="${FREELLMAPI_PORT}"
+FREELLMAPI_ENCRYPTION_KEY="${FREELLMAPI_ENCRYPTION_KEY}"
 EOF
 
     chmod 600 "$CONFIG_FILE"
@@ -331,6 +341,35 @@ render_status() {
 
         printf '  9Router public URL:        %shttps://%s-%s.proxy.daytona.work%s\n' \
             "$CYAN" "$NINEROUTER_PORT" "$daytona_id" "$NC"
+    fi
+
+    printf '\n'
+
+    is_freellmapi_installed=0
+    if container_running "$FREELLMAPI_CONTAINER"; then
+        freellmapi_status="${GREEN}Running${NC}"
+        is_freellmapi_installed=1
+    elif container_exists "$FREELLMAPI_CONTAINER"; then
+        freellmapi_status="${YELLOW}Stopped${NC}"
+        is_freellmapi_installed=1
+    else
+        freellmapi_status="${RED}Not installed${NC}"
+    fi
+
+    printf '  FreeLLMAPI:                %s\n' "$freellmapi_status"
+
+    if [ "$is_freellmapi_installed" -eq 1 ]; then
+        printf '  FreeLLMAPI port:           %s%s%s\n' \
+            "$CYAN" "$FREELLMAPI_PORT" "$NC"
+
+        freellmapi_ip="$(get_container_ip "$FREELLMAPI_CONTAINER")"
+        freellmapi_host="${freellmapi_ip:-localhost}"
+
+        printf '  FreeLLMAPI local URL:      %shttp://%s:%s%s\n' \
+            "$CYAN" "$freellmapi_host" "$FREELLMAPI_PORT" "$NC"
+
+        printf '  FreeLLMAPI public URL:     %shttps://%s-%s.proxy.daytona.work%s\n' \
+            "$CYAN" "$FREELLMAPI_PORT" "$daytona_id" "$NC"
     fi
 
     printf '\n'
@@ -673,6 +712,174 @@ install_9router() {
 }
 
 # ------------------------------------------------------------------------------
+# FreeLLMAPI
+# ------------------------------------------------------------------------------
+
+generate_encryption_key() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 32
+        return
+    fi
+
+    if [ -r /dev/urandom ] && command -v od >/dev/null 2>&1; then
+        od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+        return
+    fi
+
+    return 1
+}
+
+ensure_freellmapi_encryption_key() {
+    if [ -n "$FREELLMAPI_ENCRYPTION_KEY" ]; then
+        return 0
+    fi
+
+    FREELLMAPI_ENCRYPTION_KEY="$(generate_encryption_key)" || true
+
+    if [ -z "$FREELLMAPI_ENCRYPTION_KEY" ]; then
+        printf '%s[✗] Could not generate an encryption key (need openssl or od + /dev/urandom).%s\n' \
+            "$RED" "$NC"
+        return 1
+    fi
+
+    save_config
+    return 0
+}
+
+install_freellmapi() {
+    clear_screen
+    printf '%s--- Install / Reconfigure FreeLLMAPI ---%s\n\n' \
+        "$BOLD" "$NC"
+
+    if ! ensure_docker; then
+        return
+    fi
+
+    load_config
+
+    if container_exists "$FREELLMAPI_CONTAINER"; then
+        printf '%s[!] FreeLLMAPI already exists.%s\n\n' "$YELLOW" "$NC"
+
+        printf '1. Restart\n'
+        printf '2. Reinstall / Reconfigure\n'
+        printf '0. Cancel\n\n'
+
+        printf 'Select [0-2]: '
+        read -r option
+
+        case "$option" in
+            1)
+                docker restart "$FREELLMAPI_CONTAINER" >/dev/null
+
+                printf '%s[✓] FreeLLMAPI restarted.%s\n' \
+                    "$GREEN" "$NC"
+
+                return
+                ;;
+            2)
+                docker rm -f "$FREELLMAPI_CONTAINER" \
+                    >/dev/null 2>&1 || true
+                ;;
+            0|*)
+                return
+                ;;
+        esac
+    fi
+
+    printf 'Enter FreeLLMAPI port [default: %s]: ' "$FREELLMAPI_PORT"
+    read -r requested_port
+
+    if [ -n "$requested_port" ]; then
+        FREELLMAPI_PORT="$requested_port"
+    fi
+
+    case "$FREELLMAPI_PORT" in
+        ''|*[!0-9]*)
+            printf '%s[✗] Invalid port.%s\n' "$RED" "$NC"
+            return
+            ;;
+    esac
+
+    if [ "$FREELLMAPI_PORT" -lt 1 ] ||
+       [ "$FREELLMAPI_PORT" -gt 65535 ]; then
+
+        printf '%s[✗] Port must be between 1 and 65535.%s\n' \
+            "$RED" "$NC"
+
+        return
+    fi
+
+    if ! ensure_freellmapi_encryption_key; then
+        return
+    fi
+
+    save_config
+
+    printf '%s[*] Pulling FreeLLMAPI image...%s\n' "$BLUE" "$NC"
+
+    if ! docker pull "$FREELLMAPI_IMAGE"; then
+        printf '%s[✗] Failed to pull FreeLLMAPI image.%s\n' \
+            "$RED" "$NC"
+        return
+    fi
+
+    printf '%s[*] Starting FreeLLMAPI...%s\n' "$BLUE" "$NC"
+
+    if ! docker run -d \
+        --name "$FREELLMAPI_CONTAINER" \
+        --restart unless-stopped \
+        -p "${FREELLMAPI_PORT}:3001" \
+        -v "${FREELLMAPI_DATA_DIR}:/app/server/data" \
+        -e NODE_ENV=production \
+        -e PORT=3001 \
+        -e HOST_BIND=0.0.0.0 \
+        -e ENCRYPTION_KEY="$FREELLMAPI_ENCRYPTION_KEY" \
+        "$FREELLMAPI_IMAGE"; then
+
+        printf '%s[✗] Failed to start FreeLLMAPI.%s\n' \
+            "$RED" "$NC"
+
+        return
+    fi
+
+    sleep 6
+
+    if container_running "$FREELLMAPI_CONTAINER"; then
+        daytona_id="$(get_daytona_id)"
+
+        printf '%s[✓] FreeLLMAPI is running.%s\n\n' \
+            "$GREEN" "$NC"
+
+        freellmapi_ip="$(get_container_ip "$FREELLMAPI_CONTAINER")"
+        freellmapi_host="${freellmapi_ip:-localhost}"
+
+        printf '  Dashboard:\n'
+        printf '  %shttp://%s:%s%s\n\n' \
+            "$CYAN" "$freellmapi_host" "$FREELLMAPI_PORT" "$NC"
+
+        printf '  Daytona public URL:\n'
+        printf '  %shttps://%s-%s.proxy.daytona.work%s\n\n' \
+            "$CYAN" "$FREELLMAPI_PORT" "$daytona_id" "$NC"
+
+        printf '  OpenAI-compatible API:\n'
+        printf '  %shttp://%s:%s/v1%s\n' \
+            "$CYAN" "$freellmapi_host" "$FREELLMAPI_PORT" "$NC"
+        printf '  %shttps://%s-%s.proxy.daytona.work/v1%s\n\n' \
+            "$CYAN" "$FREELLMAPI_PORT" "$daytona_id" "$NC"
+
+        printf '  First run: open the dashboard and create the admin\n'
+        printf '  account (a one-time setup code is printed in the\n'
+        printf '  container logs — menu option 7). Add provider keys\n'
+        printf '  on the Keys page, then copy the unified API key.\n'
+    else
+        printf '%s[✗] FreeLLMAPI stopped after startup.%s\n' \
+            "$RED" "$NC"
+
+        docker logs --tail 50 "$FREELLMAPI_CONTAINER" 2>&1 || true
+    fi
+}
+
+# ------------------------------------------------------------------------------
 # Hermes Container Lifecycle Helper
 # ------------------------------------------------------------------------------
 
@@ -849,9 +1056,10 @@ show_logs() {
 
     printf '1. Hermes\n'
     printf '2. 9Router\n'
+    printf '3. FreeLLMAPI\n'
     printf '0. Cancel\n\n'
 
-    printf 'Select [0-2]: '
+    printf 'Select [0-3]: '
     read -r option
 
     case "$option" in
@@ -860,6 +1068,9 @@ show_logs() {
             ;;
         2)
             docker logs --tail 100 "$NINEROUTER_CONTAINER" 2>&1
+            ;;
+        3)
+            docker logs --tail 100 "$FREELLMAPI_CONTAINER" 2>&1
             ;;
         0|*)
             return
@@ -877,14 +1088,16 @@ exec_in_container() {
 
     printf '1. Hermes\n'
     printf '2. 9Router\n'
+    printf '3. FreeLLMAPI\n'
     printf '0. Cancel\n\n'
 
-    printf 'Select [0-2]: '
+    printf 'Select [0-3]: '
     read -r target_option
 
     case "$target_option" in
         1) target_container="$HERMES_CONTAINER" ;;
         2) target_container="$NINEROUTER_CONTAINER" ;;
+        3) target_container="$FREELLMAPI_CONTAINER" ;;
         0|*) return ;;
     esac
 
@@ -919,31 +1132,33 @@ while true; do
     printf '\n'
     printf '1. Install / Reinstall Hermes\n'
     printf '2. Install / Reconfigure 9Router\n'
+    printf '3. Install / Reconfigure FreeLLMAPI\n'
     printf '\n'
-    printf '3. Set Hermes API endpoint and token\n'
-    printf '4. Set Hermes Telegram bot token and allowed users\n'
+    printf '4. Set Hermes API endpoint and token\n'
+    printf '5. Set Hermes Telegram bot token and allowed users\n'
     printf '\n'
-    printf '5. Show Hermes configuration\n'
-    printf '6. Show container logs\n'
+    printf '6. Show Hermes configuration\n'
+    printf '7. Show container logs\n'
     printf '\n'
-    printf '7. Execute command inside container\n'
+    printf '8. Execute command inside container\n'
     printf '\n'
     printf '0. Exit\n'
 
     printf '\n%s───────────────────────────────────────────────────────────────────────────%s\n\n' \
         "$CYAN" "$NC"
 
-    printf 'Select an option [0-7]: '
+    printf 'Select an option [0-8]: '
     read -r choice
 
     case "$choice" in
         1) install_hermes ;;
         2) install_9router ;;
-        3) set_hermes_api ;;
-        4) set_telegram ;;
-        5) show_hermes_config ;;
-        6) show_logs ;;
-        7) exec_in_container ;;
+        3) install_freellmapi ;;
+        4) set_hermes_api ;;
+        5) set_telegram ;;
+        6) show_hermes_config ;;
+        7) show_logs ;;
+        8) exec_in_container ;;
         0) printf '%sExiting.%s\n' "$GREEN" "$NC"; exit 0 ;;
         *) printf '%s[✗] Invalid option.%s\n' "$RED" "$NC" ;;
     esac

@@ -1,4 +1,4 @@
-# Hermes Agent & 9Router on Daytona
+# Hermes Agent & 9Router & FreeLLMAPI on Daytona
 
 An interactive management CLI and deployment toolkit for orchestrating Hermes Agent and 9Router inside a Daytona Docker-in-Docker (DinD) sandbox with Telegram gateway integration.
 
@@ -10,6 +10,7 @@ An interactive management CLI and deployment toolkit for orchestrating Hermes Ag
 * **Hermes Agent:** Autonomous AI agent operating in an isolated container with local persistence.
 * **Telegram Gateway:** Direct two-way messaging channel with user ID whitelisting.
 * **9Router:** Local/public OpenAI-compatible API gateway and management dashboard.
+* **FreeLLMAPI:** Local/public OpenAI-compatible gateway aggregating 34+ free LLM providers (635+ model endpoints) behind one `/v1` endpoint with smart routing and automatic failover ([tashfeenahmed/freellmapi](https://github.com/tashfeenahmed/freellmapi)).
 * **TUI Console (`install.sh`):** Interactive terminal interface with live status checks, masked secrets, automated daemon recovery, log inspection, and Daytona proxy URL discovery.
 
 ---
@@ -63,18 +64,24 @@ Status
   9Router local URL:         http://<CONTAINER_IP>:20128
   9Router public URL:        https://20128-<SANDBOX_ID>.proxy.daytona.work
 
+  FreeLLMAPI:                Running
+  FreeLLMAPI port:           3001
+  FreeLLMAPI local URL:      http://<CONTAINER_IP>:3001
+  FreeLLMAPI public URL:     https://3001-<SANDBOX_ID>.proxy.daytona.work
+
 ───────────────────────────────────────────────────────────────────────────
 
 1. Install / Reinstall Hermes
 2. Install / Reconfigure 9Router
+3. Install / Reconfigure FreeLLMAPI
 
-3. Set Hermes API endpoint and token
-4. Set Hermes Telegram bot token and allowed users
+4. Set Hermes API endpoint and token
+5. Set Hermes Telegram bot token and allowed users
 
-5. Show Hermes configuration
-6. Show container logs
+6. Show Hermes configuration
+7. Show container logs
 
-7. Execute command inside container
+8. Execute command inside container
 
 0. Exit
 
@@ -89,19 +96,22 @@ Status
 * **2. Install / Reconfigure 9Router:** Configures listening port (default: `20128`) and initial password (default: `123456`), pulls `ghcr.io/whoisneon/9router:latest`, attaches persistence to `${HOME}/hermes-manager/9router-data`, and spins up the container.
 
 
-* **3. Set Hermes API endpoint and token:** Updates the target OpenAI-compatible endpoint and access token. Automatically updates container environment variables and internal `hermes config` values, restarting the container if running.
+* **3. Install / Reconfigure FreeLLMAPI:** Configures listening port (default: `3001`), generates (once) and persists an `ENCRYPTION_KEY` for at-rest provider key storage, pulls `ghcr.io/tashfeenahmed/freellmapi:latest`, attaches persistence to `${HOME}/hermes-manager/freellmapi-data`, and spins up the container. On first run, open the dashboard and create the admin account — a one-time setup code is printed in the container logs (menu option `7`). Add your free provider keys on the Keys page and copy the unified API key to point Hermes or any OpenAI-compatible client at `.../v1`.
 
 
-* **4. Set Hermes Telegram bot token and allowed users:** Configures Telegram bot credentials and numeric allowed user IDs, safely restarting the container to apply changes.
+* **4. Set Hermes API endpoint and token:** Updates the target OpenAI-compatible endpoint and access token. Automatically updates container environment variables and internal `hermes config` values, restarting the container if running.
 
 
-* **5. Show Hermes configuration:** Displays persisted configuration variables and runs `hermes config` inside the container while stripping sensitive keys and tokens from terminal output.
+* **5. Set Hermes Telegram bot token and allowed users:** Configures Telegram bot credentials and numeric allowed user IDs, safely restarting the container to apply changes.
 
 
-* **6. Show container logs:** Dumps the last 100 log lines for either `hermes` or `9router`.
+* **6. Show Hermes configuration:** Displays persisted configuration variables and runs `hermes config` inside the container while stripping sensitive keys and tokens from terminal output.
 
 
-* **7. Execute command inside container:** Drops into an interactive sub-shell execution loop inside either the `hermes` or `9router` container (enter `exitnow` to return to the main menu).
+* **7. Show container logs:** Dumps the last 100 log lines for `hermes`, `9router`, or `freellmapi`.
+
+
+* **8. Execute command inside container:** Drops into an interactive sub-shell execution loop inside either the `hermes`, `9router`, or `freellmapi` container (enter `exitnow` to return to the main menu).
 
 
 * **0. Exit:** Cleanly closes the management console.
@@ -135,7 +145,10 @@ The script organizes runtime configurations and storage across several host loca
 * **9Router Storage (`${HOME}/hermes-manager/9router-data`):** Mounted to `/app/data` to retain router configuration and logs.
 
 
-* **CLI State (`${HOME}/hermes-manager/config.env`):** Saved with strict permissions (`0600`) to retain custom ports, passwords, and model endpoint preferences across script sessions.
+* **FreeLLMAPI Storage (`${HOME}/hermes-manager/freellmapi-data`):** Mounted to `/app/server/data` to retain the SQLite database (provider keys, models, settings — encrypted at rest) across container recreations.
+
+
+* **CLI State (`${HOME}/hermes-manager/config.env`):** Saved with strict permissions (`0600`) to retain custom ports, passwords, the FreeLLMAPI encryption key, and model endpoint preferences across script sessions.
 
 
 
