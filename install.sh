@@ -6,10 +6,18 @@ set -u
 # Constants
 # ------------------------------------------------------------------------------
 
-SCRIPT_VERSION="v0.2.0"
+SCRIPT_VERSION="v0.3.0"
 
 BASE_DIR="${HOME}/hermes-manager"
 CONFIG_FILE="${BASE_DIR}/config.env"
+
+CLI_COMMAND="daytona-hermes"
+CLI_SCRIPT="${BASE_DIR}/install.sh"
+CLI_RAW_URL="https://raw.githubusercontent.com/WhoisNeon/Daytona-Hermes/main/install.sh"
+
+DOCKER_CONFIG_FILE="${HOME}/.docker/config.json"
+DOCKER_CONFIG_BACKUP="${HOME}/.docker/config.json.hermes.bak"
+DOCKER_PROXY_STATE="${BASE_DIR}/docker-proxy.state"
 
 HERMES_DATA_DIR="/data/hermes"
 NINEROUTER_DATA_DIR="${BASE_DIR}/9router-data"
@@ -21,7 +29,7 @@ HERMES_CONTAINER="hermes"
 NINEROUTER_CONTAINER="9router"
 FREELLMAPI_CONTAINER="freellmapi"
 
-NINEROUTER_IMAGE="ghcr.io/whoisneon/9router:latest"
+NINEROUTER_IMAGE="decolua/9router:latest"
 DEFAULT_NINEROUTER_PORT="20128"
 DEFAULT_NINEROUTER_PASSWORD="123456"
 
@@ -36,12 +44,15 @@ XRAY_LINK_FILE="${XRAY_DATA_DIR}/node.link"
 XRAY_CONTAINER="xray"
 XRAY_IMAGE="teddysun/xray:latest"
 
-XRAY_LISTEN="127.0.0.1"
+# Bind every interface so containers on the Docker bridge can reach the proxy;
+# host tools keep talking to loopback.
+XRAY_LISTEN="0.0.0.0"
+XRAY_CLIENT_HOST="127.0.0.1"
 XRAY_SOCKS_PORT="10808"
 XRAY_HTTP_PORT="10809"
 
-XRAY_PROXY_URL="http://${XRAY_LISTEN}:${XRAY_HTTP_PORT}"
-XRAY_SOCKS_URL="socks5://${XRAY_LISTEN}:${XRAY_SOCKS_PORT}"
+XRAY_PROXY_URL="http://${XRAY_CLIENT_HOST}:${XRAY_HTTP_PORT}"
+XRAY_SOCKS_URL="socks5://${XRAY_CLIENT_HOST}:${XRAY_SOCKS_PORT}"
 XRAY_NO_PROXY_LIST="localhost,127.0.0.1,::1,0.0.0.0"
 
 XRAY_PROFILE_FILE="/etc/profile.d/hermes-xray-proxy.sh"
@@ -79,7 +90,114 @@ YELLOW="$(printf '\033[1;33m')"
 BLUE="$(printf '\033[0;34m')"
 CYAN="$(printf '\033[0;36m')"
 BOLD="$(printf '\033[1m')"
+DIM="$(printf '\033[2m')"
 NC="$(printf '\033[0m')"
+
+# ------------------------------------------------------------------------------
+# Menu Engine
+# ------------------------------------------------------------------------------
+
+BOX_W=72
+BOX_BAR=""
+_bb_i=0
+while [ "$_bb_i" -lt 74 ]; do
+    BOX_BAR="${BOX_BAR}─"
+    _bb_i=$((_bb_i + 1))
+done
+
+ok()   { printf '\n  %s[✓]%s %s\n' "$GREEN" "$NC" "$1"; }
+info() { printf '  %s[*]%s %s\n' "$BLUE" "$NC" "$1"; }
+warn() { printf '  %s[!]%s %s\n' "$YELLOW" "$NC" "$1"; }
+fail() { printf '  %s[✗]%s %s\n' "$RED" "$NC" "$1"; }
+
+screen_title() {
+    printf '\n%s%s%s\n' "$BOLD$CYAN" "$1" "$NC"
+    printf '%s%s%s\n' "$CYAN" "$BOX_BAR" "$NC"
+}
+
+section() {
+    printf '\n  %s%s%s\n' "$BOLD$CYAN" "$1" "$NC"
+}
+
+box_top() {
+    printf '%s╭%s╮%s\n' "$CYAN" "$BOX_BAR" "$NC"
+}
+
+box_bottom() {
+    printf '%s╰%s╯%s\n' "$CYAN" "$BOX_BAR" "$NC"
+}
+
+box_blank() {
+    printf '%s│%s %-*s %s│%s\n' "$CYAN" "$NC" "$BOX_W" "" "$CYAN" "$NC"
+}
+
+# box_text <color> <plain ascii text>
+box_text() {
+    _bt_pad=$((BOX_W - ${#2}))
+
+    if [ "$_bt_pad" -lt 0 ]; then
+        _bt_pad=0
+    fi
+
+    printf '%s│%s %s%s%s%*s %s│%s\n' \
+        "$CYAN" "$NC" "$1" "$2" "$NC" "$_bt_pad" "" "$CYAN" "$NC"
+}
+
+box_title() {
+    box_text "$BOLD$CYAN" "$1"
+}
+
+# box_kv <plain key> <plain value> <value color>
+box_kv() {
+    _bk_pad=$((BOX_W - ${#1} - ${#2}))
+
+    if [ "$_bk_pad" -lt 0 ]; then
+        _bk_pad=0
+    fi
+
+    printf '%s│%s %s%s%s%s%*s %s│%s\n' \
+        "$CYAN" "$NC" "$1" "$3" "$2" "$NC" "$_bk_pad" "" "$CYAN" "$NC"
+}
+
+# menu_item <number> <label> [description]
+menu_item() {
+    if [ -n "${3:-}" ]; then
+        printf '  %s%3s%s  %-38s %s%s%s\n' \
+            "$CYAN" "$1" "$NC" "$2" "$DIM" "$3" "$NC"
+    else
+        printf '  %s%3s%s  %s\n' "$CYAN" "$1" "$NC" "$2"
+    fi
+}
+
+prompt_read() {
+    printf '\n  %s%s %s' "$BOLD" "$1" "$NC"
+    read -r _pr_value
+}
+
+pause_menu() {
+    printf '\n  %sPress Enter to continue...%s' "$DIM" "$NC"
+    read -r _pause
+}
+
+confirm_yes() {
+    printf '\n  %s%s%s [Y/n]: ' "$YELLOW" "$1" "$NC"
+    read -r _confirm
+
+    case "$_confirm" in
+        ''|[Yy]*) return 0 ;;
+        *)        return 1 ;;
+    esac
+}
+
+confirm_no() {
+    printf '\n  %s%s%s [y/N]: ' "$YELLOW" "$1" "$NC"
+    read -r _confirm
+
+    case "$_confirm" in
+        [Yy]*) return 0 ;;
+        *)     return 1 ;;
+    esac
+}
 
 # ------------------------------------------------------------------------------
 # Version
@@ -91,30 +209,6 @@ get_version() {
     else
         printf '%s' "$SCRIPT_VERSION"
     fi
-}
-
-# ------------------------------------------------------------------------------
-# Banner
-# ------------------------------------------------------------------------------
-
-render_banner() {
-    version="$(get_version)"
-    author_url="https://github.com/WhoisNeon/Daytona-Hermes"
-
-    link_start="\033]8;;${author_url}\033\\"
-    link_end="\033]8;;\033\\"
-
-    printf '%s%s\n' "$CYAN" "$BOLD"
-    printf '  _   _                                    _                    _   \n'
-    printf ' | | | | ___ _ __ _ __ ___   ___  ___     / \\   __ _  ___ _ __ | |_ \n'
-    printf ' | |_| |/ _ \\ '\''__| '\''_ ` _ \\ / _ \\/ __|   / _ \\ / _` |/ _ \\ '\''_ \\| __|\n'
-    printf ' |  _  |  __/ |  | | | | | |  __/\\__ \\  / ___ \\ (_| |  __/ | | | |_ \n'
-    printf ' |_| |_|\\___|_|  |_| |_| |_|\\___||___/ /_/   \\_\\__, |\\___|_| |_|\\__|\n'
-    printf '                                               |___/                \n'
-    printf '\n'
-    printf '       Daytona Sandbox Edition • By %bWhoisNeon%b • %s\n' \
-        "$link_start" "$link_end" "$version"
-    printf '%s\n' "$NC"
 }
 
 # ------------------------------------------------------------------------------
@@ -305,130 +399,234 @@ get_container_ip() {
 }
 
 # ------------------------------------------------------------------------------
-# Status
+# Component State
 # ------------------------------------------------------------------------------
 
-render_status() {
+container_state() {
+    if container_running "$1"; then
+        printf 'running'
+    elif container_exists "$1"; then
+        printf 'stopped'
+    else
+        printf 'not installed'
+    fi
+}
+
+state_color() {
+    case "$1" in
+        running) printf '%s' "$GREEN" ;;
+        stopped) printf '%s' "$YELLOW" ;;
+        *)       printf '%s' "$RED" ;;
+    esac
+}
+
+# ------------------------------------------------------------------------------
+# CLI Command (daytona-hermes)
+# ------------------------------------------------------------------------------
+
+SCRIPT_SOURCE=""
+
+if [ -f "$0" ]; then
+    SCRIPT_SOURCE="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
+fi
+
+install_cli_command() {
+    if [ -n "$SCRIPT_SOURCE" ] && [ -f "$SCRIPT_SOURCE" ]; then
+        mkdir -p "$BASE_DIR" 2>/dev/null || true
+        cp "$SCRIPT_SOURCE" "$CLI_SCRIPT" 2>/dev/null || true
+    fi
+
+    if [ ! -f "$CLI_SCRIPT" ]; then
+        return 1
+    fi
+
+    chmod +x "$CLI_SCRIPT" 2>/dev/null || true
+
+    _ic_first="$(printf '%s' "${PATH:-}" | cut -d: -f1)"
+
+    for _ic_dir in /usr/local/bin "${HOME}/.local/bin" "$_ic_first"; do
+        [ -n "$_ic_dir" ] || continue
+        mkdir -p "$_ic_dir" 2>/dev/null || continue
+        [ -w "$_ic_dir" ] || continue
+
+        if ln -sf "$CLI_SCRIPT" "${_ic_dir}/${CLI_COMMAND}" 2>/dev/null; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+cli_command_path() {
+    command -v "$CLI_COMMAND" 2>/dev/null || true
+}
+
+update_manager() {
+    if ! command -v wget >/dev/null 2>&1; then
+        fail "wget is not available."
+        return 1
+    fi
+
+    info "Downloading the latest manager..."
+
+    if ! wget -q -O "${CLI_SCRIPT}.new" "$CLI_RAW_URL" ||
+       [ ! -s "${CLI_SCRIPT}.new" ]; then
+
+        rm -f "${CLI_SCRIPT}.new"
+        fail "Download failed."
+        return 1
+    fi
+
+    mv "${CLI_SCRIPT}.new" "$CLI_SCRIPT"
+    chmod +x "$CLI_SCRIPT" 2>/dev/null || true
+    install_cli_command >/dev/null 2>&1 || true
+
+    ok "Manager updated. Restart '${CLI_COMMAND}' to use the new version."
+}
+
+# ------------------------------------------------------------------------------
+# Docker Client Proxy (containers)
+# ------------------------------------------------------------------------------
+#
+# ~/.docker/config.json makes the Docker CLI inject http(s)_proxy into every
+# container it creates, so traffic from newly created containers goes through
+# the local Xray proxy.
+
+docker_bridge_gateway() {
+    _dg_gw="$(docker network inspect bridge \
+        --format '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)"
+
+    if [ -n "$_dg_gw" ]; then
+        printf '%s' "$_dg_gw"
+        return 0
+    fi
+
+    printf '172.17.0.1'
+}
+
+docker_proxy_url() {
+    printf 'http://%s:%s' "$(docker_bridge_gateway)" "$XRAY_HTTP_PORT"
+}
+
+docker_proxy_enabled() {
+    [ -f "$DOCKER_PROXY_STATE" ]
+}
+
+enable_docker_proxy() {
+    if ! docker_ready; then
+        warn "Docker daemon is not available; skipping the Docker proxy setup."
+        return 1
+    fi
+
+    _dp_url="$(docker_proxy_url)"
+    mkdir -p "$(dirname "$DOCKER_CONFIG_FILE")" 2>/dev/null || true
+
+    # Keep the user's existing config around so disabling restores it.
+    if [ ! -f "$DOCKER_PROXY_STATE" ] && [ -f "$DOCKER_CONFIG_FILE" ]; then
+        cp "$DOCKER_CONFIG_FILE" "$DOCKER_CONFIG_BACKUP" 2>/dev/null || true
+    fi
+
+    if command -v jq >/dev/null 2>&1 && [ -f "$DOCKER_CONFIG_FILE" ]; then
+        _dp_tmp="${DOCKER_CONFIG_FILE}.hermes.$$"
+
+        if jq --arg p "$_dp_url" --arg np "$XRAY_NO_PROXY_LIST" \
+            '.proxies.default = {"httpProxy": $p, "httpsProxy": $p, "noProxy": $np}' \
+            "$DOCKER_CONFIG_FILE" > "$_dp_tmp" 2>/dev/null; then
+
+            mv "$_dp_tmp" "$DOCKER_CONFIG_FILE"
+        else
+            rm -f "$_dp_tmp"
+        fi
+    elif command -v python3 >/dev/null 2>&1 && [ -f "$DOCKER_CONFIG_FILE" ]; then
+        python3 - "$DOCKER_CONFIG_FILE" "$_dp_url" "$XRAY_NO_PROXY_LIST" <<'PY' 2>/dev/null || true
+import json, sys
+path, proxy, noproxy = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(path) as f:
+        data = json.load(f)
+except Exception:
+    data = {}
+data.setdefault("proxies", {})["default"] = {
+    "httpProxy": proxy,
+    "httpsProxy": proxy,
+    "noProxy": noproxy,
+}
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+PY
+    fi
+
+    if ! grep -qF "$_dp_url" "$DOCKER_CONFIG_FILE" 2>/dev/null; then
+        cat > "$DOCKER_CONFIG_FILE" <<EOF
+{
+  "proxies": {
+    "default": {
+      "httpProxy": "${_dp_url}",
+      "httpsProxy": "${_dp_url}",
+      "noProxy": "${XRAY_NO_PROXY_LIST}"
+    }
+  }
+}
+EOF
+    fi
+
+    printf '%s\n' "$_dp_url" > "$DOCKER_PROXY_STATE"
+    return 0
+}
+
+disable_docker_proxy() {
+    if [ -f "$DOCKER_CONFIG_BACKUP" ]; then
+        mv -f "$DOCKER_CONFIG_BACKUP" "$DOCKER_CONFIG_FILE" 2>/dev/null || true
+    elif [ -f "$DOCKER_CONFIG_FILE" ]; then
+        # Keep the file when it holds settings that are not ours.
+        if grep -q '"auths"' "$DOCKER_CONFIG_FILE" 2>/dev/null; then
+            warn "Left $DOCKER_CONFIG_FILE in place (it has other settings); remove the proxies block manually."
+        else
+            rm -f "$DOCKER_CONFIG_FILE" 2>/dev/null || true
+        fi
+    fi
+
+    rm -f "$DOCKER_PROXY_STATE" 2>/dev/null || true
+    return 0
+}
+
+# ------------------------------------------------------------------------------
+# Dashboard
+# ------------------------------------------------------------------------------
+
+render_dashboard() {
     load_config
 
-    if container_running "$HERMES_CONTAINER"; then
-        hermes_status="${GREEN}Running${NC}"
-    elif container_exists "$HERMES_CONTAINER"; then
-        hermes_status="${YELLOW}Stopped${NC}"
-    else
-        hermes_status="${RED}Not installed${NC}"
-    fi
+    box_top
+    box_title "HERMES  -  Daytona Sandbox Edition"
+    box_text "$DIM" "Hermes | 9Router | FreeLLMAPI | Xray            WhoisNeon | $(get_version)"
+    box_blank
 
-    is_router_installed=0
-    if container_running "$NINEROUTER_CONTAINER"; then
-        router_status="${GREEN}Running${NC}"
-        is_router_installed=1
-    elif container_exists "$NINEROUTER_CONTAINER"; then
-        router_status="${YELLOW}Stopped${NC}"
-        is_router_installed=1
-    else
-        router_status="${RED}Not installed${NC}"
-    fi
+    _rd_state="$(container_state "$HERMES_CONTAINER")"
+    box_kv "  Hermes        " "$_rd_state" "$(state_color "$_rd_state")"
 
-    daytona_id="$(get_daytona_id)"
+    _rd_state="$(container_state "$NINEROUTER_CONTAINER")"
+    box_kv "  9Router       " "$_rd_state" "$(state_color "$_rd_state")"
 
-    printf '%s───────────────────────────────────────────────────────────────────────────%s\n' \
-      "$CYAN" "$NC"
+    _rd_state="$(container_state "$FREELLMAPI_CONTAINER")"
+    box_kv "  FreeLLMAPI    " "$_rd_state" "$(state_color "$_rd_state")"
 
-    printf '%s%sStatus%s\n\n' "$BOLD" "$CYAN" "$NC"
-
-    printf '  Hermes:                    %s\n' "$hermes_status"
-
-    printf '  Hermes API endpoint:       %s%s%s\n' \
-        "$CYAN" "${HERMES_API_URL:-Not set}" "$NC"
-
-    printf '  Hermes API token:          %s%s%s\n' \
-        "$CYAN" "$(redact_secret "${HERMES_API_TOKEN:-}")" "$NC"
-
-    printf '\n'
-
-    printf '  Telegram bot token:        %s%s%s\n' \
-        "$CYAN" "$(redact_secret "${TELEGRAM_BOT_TOKEN:-}")" "$NC"
-
-    printf '  Telegram allowed users:    %s%s%s\n' \
-        "$CYAN" "${TELEGRAM_ALLOWED_USERS:-Not set}" "$NC"
-
-    printf '\n'
-
-    printf '  9Router:                   %s\n' "$router_status"
-
-    if [ "$is_router_installed" -eq 1 ]; then
-        printf '  9Router port:              %s%s%s\n' \
-            "$CYAN" "$NINEROUTER_PORT" "$NC"
-
-        router_ip="$(get_container_ip "$NINEROUTER_CONTAINER")"
-        router_host="${router_ip:-localhost}"
-
-        printf '  9Router local URL:         %shttp://%s:%s%s\n' \
-            "$CYAN" "$router_host" "$NINEROUTER_PORT" "$NC"
-
-        printf '  9Router public URL:        %shttps://%s-%s.proxy.daytona.work%s\n' \
-            "$CYAN" "$NINEROUTER_PORT" "$daytona_id" "$NC"
-    fi
-
-    printf '\n'
-
-    is_freellmapi_installed=0
-    if container_running "$FREELLMAPI_CONTAINER"; then
-        freellmapi_status="${GREEN}Running${NC}"
-        is_freellmapi_installed=1
-    elif container_exists "$FREELLMAPI_CONTAINER"; then
-        freellmapi_status="${YELLOW}Stopped${NC}"
-        is_freellmapi_installed=1
-    else
-        freellmapi_status="${RED}Not installed${NC}"
-    fi
-
-    printf '  FreeLLMAPI:                %s\n' "$freellmapi_status"
-
-    if [ "$is_freellmapi_installed" -eq 1 ]; then
-        printf '  FreeLLMAPI port:           %s%s%s\n' \
-            "$CYAN" "$FREELLMAPI_PORT" "$NC"
-
-        freellmapi_ip="$(get_container_ip "$FREELLMAPI_CONTAINER")"
-        freellmapi_host="${freellmapi_ip:-localhost}"
-
-        printf '  FreeLLMAPI local URL:      %shttp://%s:%s%s\n' \
-            "$CYAN" "$freellmapi_host" "$FREELLMAPI_PORT" "$NC"
-
-        printf '  FreeLLMAPI public URL:     %shttps://%s-%s.proxy.daytona.work%s\n' \
-            "$CYAN" "$FREELLMAPI_PORT" "$daytona_id" "$NC"
-    fi
-
-    printf '\n'
-
-    if container_running "$XRAY_CONTAINER"; then
-        xray_status="${GREEN}Running${NC}"
-    elif container_exists "$XRAY_CONTAINER"; then
-        xray_status="${YELLOW}Stopped${NC}"
-    else
-        xray_status="${RED}Not installed${NC}"
-    fi
+    _rd_state="$(container_state "$XRAY_CONTAINER")"
+    box_kv "  Xray core     " "$_rd_state" "$(state_color "$_rd_state")"
 
     if xray_proxy_enabled; then
-        xray_proxy_status="${GREEN}Enabled${NC}"
+        box_kv "  System proxy  " "enabled" "$GREEN"
     else
-        xray_proxy_status="${YELLOW}Disabled${NC}"
+        box_kv "  System proxy  " "disabled" "$YELLOW"
     fi
 
-    printf '  Xray core:                 %s\n' "$xray_status"
-    printf '  Xray system proxy:         %s\n' "$xray_proxy_status"
-
-    if [ -n "$XRAY_NODE_LABEL" ]; then
-        printf '  Xray node:                 %s%s%s\n' \
-            "$CYAN" "$XRAY_NODE_LABEL" "$NC"
+    if docker_proxy_enabled; then
+        box_kv "  Docker proxy  " "enabled" "$GREEN"
+    else
+        box_kv "  Docker proxy  " "disabled" "$YELLOW"
     fi
 
-    if [ -f "$XRAY_CONFIG_FILE" ]; then
-        printf '  Xray SOCKS / HTTP:         %s%s / %s%s\n' \
-            "$CYAN" "$XRAY_SOCKS_URL" "$XRAY_PROXY_URL" "$NC"
-    fi
-
+    box_bottom
     printf '\n'
 }
 
@@ -505,93 +703,207 @@ EOF
 }
 
 # ------------------------------------------------------------------------------
-# Install Hermes
+# Hermes Install / Update
 # ------------------------------------------------------------------------------
 
-install_hermes() {
-    clear_screen
-    printf '%s--- Install Hermes ---%s\n\n' "$BOLD" "$NC"
-
-    if ! ensure_docker; then
-        return
-    fi
-
-    if container_exists "$HERMES_CONTAINER"; then
-        printf '%s[!] Hermes already exists.%s\n\n' "$YELLOW" "$NC"
-
-        printf '1. Restart\n'
-        printf '2. Rebuild\n'
-        printf '0. Cancel\n\n'
-
-        printf 'Select [0-2]: '
-        read -r option
-
-        case "$option" in
-            1)
-                docker restart "$HERMES_CONTAINER" >/dev/null
-                printf '%s[✓] Hermes restarted.%s\n' "$GREEN" "$NC"
-                return
-                ;;
-            2)
-                docker rm -f "$HERMES_CONTAINER" >/dev/null 2>&1 || true
-                ;;
-            0|*)
-                return
-                ;;
-        esac
-    fi
-
+hermes_build_image() {
     if ! prepare_hermes_source; then
-        return
+        return 1
     fi
 
     write_hermes_env
 
-    cd "$HERMES_REPO_DIR" || return
+    cd "$HERMES_REPO_DIR" || return 1
 
     if [ ! -f Dockerfile ]; then
-        printf '%s[✗] Hermes template does not contain a Dockerfile.%s\n' \
-            "$RED" "$NC"
-        return
+        fail "The Hermes template does not contain a Dockerfile."
+        return 1
     fi
 
-    printf '%s[*] Building Hermes image...%s\n' "$BLUE" "$NC"
+    info "Building the Hermes image..."
 
     if ! docker build \
         --build-arg HERMES_IMAGE_VERSION=latest \
         -t hermes-agent:latest .; then
 
-        printf '%s[✗] Hermes Docker build failed.%s\n' "$RED" "$NC"
-        return
+        fail "Hermes Docker build failed."
+        return 1
     fi
 
-    printf '%s[*] Starting Hermes...%s\n' "$BLUE" "$NC"
+    return 0
+}
+
+hermes_run_container() {
+    info "Starting Hermes..."
 
     if ! docker run -d \
         --name "$HERMES_CONTAINER" \
         --restart unless-stopped \
         --env-file "${HERMES_REPO_DIR}/.env" \
         -v "${HERMES_DATA_DIR}:/data" \
-        hermes-agent:latest; then
+        hermes-agent:latest >/dev/null; then
 
-        printf '%s[✗] Failed to start Hermes.%s\n' "$RED" "$NC"
-        return
+        fail "Failed to start Hermes."
+        return 1
     fi
 
     sleep 4
 
-    if container_running "$HERMES_CONTAINER"; then
-        printf '%s[✓] Hermes installed and running.%s\n' \
-            "$GREEN" "$NC"
-
-        configure_hermes_inside_container
-    else
-        printf '%s[✗] Hermes stopped after startup.%s\n' \
-            "$RED" "$NC"
-
+    if ! container_running "$HERMES_CONTAINER"; then
+        fail "Hermes stopped after startup."
         printf '\n%sHermes logs:%s\n' "$YELLOW" "$NC"
         docker logs --tail 50 "$HERMES_CONTAINER" 2>&1 || true
+        return 1
     fi
+
+    configure_hermes_inside_container
+    return 0
+}
+
+hermes_deploy() {
+    if container_exists "$HERMES_CONTAINER"; then
+        docker rm -f "$HERMES_CONTAINER" >/dev/null 2>&1 || true
+    fi
+
+    if ! hermes_build_image; then
+        return 1
+    fi
+
+    if ! hermes_run_container; then
+        return 1
+    fi
+
+    return 0
+}
+
+install_hermes() {
+    clear_screen
+    screen_title "Hermes · Install / Rebuild"
+
+    if ! ensure_docker; then
+        return
+    fi
+
+    load_config
+
+    if container_exists "$HERMES_CONTAINER"; then
+        if ! confirm_yes "Hermes already exists. Rebuild it? Data in ${HERMES_DATA_DIR} is kept."; then
+            warn "Cancelled."
+            return
+        fi
+    fi
+
+    if hermes_deploy; then
+        ok "Hermes is installed and running."
+    fi
+}
+
+update_hermes() {
+    clear_screen
+    screen_title "Hermes · Update"
+
+    if ! ensure_docker; then
+        return
+    fi
+
+    load_config
+
+    if ! container_exists "$HERMES_CONTAINER"; then
+        warn "Hermes is not installed yet."
+        return
+    fi
+
+    info "Re-downloading the template and rebuilding the image..."
+
+    if hermes_deploy; then
+        ok "Hermes is updated and running."
+    fi
+}
+
+uninstall_hermes() {
+    clear_screen
+    screen_title "Hermes · Uninstall"
+
+    if ! ensure_docker; then
+        return
+    fi
+
+    if container_exists "$HERMES_CONTAINER"; then
+        if confirm_yes "Remove the Hermes container?"; then
+            docker rm -f "$HERMES_CONTAINER" >/dev/null 2>&1 || true
+            ok "Hermes container removed."
+        else
+            warn "Cancelled."
+            return
+        fi
+    else
+        warn "Hermes is not installed."
+    fi
+
+    if [ -d "$HERMES_DATA_DIR" ]; then
+        if confirm_no "Delete Hermes data (${HERMES_DATA_DIR})? This erases agent memory and skills."; then
+            rm -rf "$HERMES_DATA_DIR"
+            ok "Hermes data deleted."
+        else
+            info "Data kept at ${HERMES_DATA_DIR}."
+        fi
+    fi
+
+    if confirm_no "Remove the Hermes image and the downloaded template?"; then
+        docker rmi hermes-agent:latest >/dev/null 2>&1 || true
+        rm -rf "$HERMES_REPO_DIR"
+        ok "Image and template removed."
+    fi
+}
+
+hermes_menu() {
+    while true; do
+        clear_screen
+        load_config
+
+        screen_title "Hermes"
+
+        _hm_state="$(container_state "$HERMES_CONTAINER")"
+
+        box_top
+        box_kv "  Status        " "$_hm_state" "$(state_color "$_hm_state")"
+        box_text "$DIM" "  API           ${HERMES_API_URL:-not set}"
+        box_text "$DIM" "  Model         ${HERMES_MODEL}"
+        box_bottom
+
+        printf '\n'
+        menu_item 1 "Install / Rebuild" "download template, build image"
+        menu_item 2 "Update" "rebuild with the latest template"
+        menu_item 3 "Configure API endpoint & token"
+        menu_item 4 "Restart"
+        menu_item 5 "Stop"
+        menu_item 6 "Start"
+        menu_item 7 "Logs"
+        menu_item 8 "Shell"
+        menu_item 9 "Uninstall"
+
+        printf '\n'
+        menu_item 0 "Back"
+
+        printf '\n  Select [0-9]: '
+        read -r _hm_choice
+
+        case "$_hm_choice" in
+            1) install_hermes ;;
+            2) update_hermes ;;
+            3) set_hermes_api ;;
+            4) service_restart "$HERMES_CONTAINER" ;;
+            5) service_stop "$HERMES_CONTAINER" ;;
+            6) service_start "$HERMES_CONTAINER" ;;
+            7) show_logs_for "$HERMES_CONTAINER" ;;
+            8) shell_into "$HERMES_CONTAINER" ;;
+            9) uninstall_hermes ;;
+            0) return ;;
+            *) fail "Invalid option." ;;
+        esac
+
+        pause_menu
+    done
 }
 
 # ------------------------------------------------------------------------------
@@ -611,7 +923,7 @@ configure_hermes_inside_container() {
         "$BLUE" "$NC"
 
     docker exec "$HERMES_CONTAINER" \
-        hermes config set model.provider openai-api \
+        hermes config set model.provider custom \
         >/dev/null 2>&1 || true
 
     docker exec "$HERMES_CONTAINER" \
@@ -639,85 +951,61 @@ configure_hermes_inside_container() {
 # 9Router
 # ------------------------------------------------------------------------------
 
-install_9router() {
-    clear_screen
-    printf '%s--- Install / Reconfigure 9Router ---%s\n\n' \
-        "$BOLD" "$NC"
+ninrouter_configure() {
+    printf '\n  Port [%s]: ' "$NINEROUTER_PORT"
+    read -r _nr_port
 
-    if ! ensure_docker; then
-        return
-    fi
-
-    if container_exists "$NINEROUTER_CONTAINER"; then
-        printf '%s[!] 9Router already exists.%s\n\n' "$YELLOW" "$NC"
-
-        printf '1. Restart\n'
-        printf '2. Reinstall / Reconfigure\n'
-        printf '0. Cancel\n\n'
-
-        printf 'Select [0-2]: '
-        read -r option
-
-        case "$option" in
-            1)
-                docker restart "$NINEROUTER_CONTAINER" >/dev/null
-
-                printf '%s[✓] 9Router restarted.%s\n' \
-                    "$GREEN" "$NC"
-
-                return
-                ;;
-            2)
-                docker rm -f "$NINEROUTER_CONTAINER" \
-                    >/dev/null 2>&1 || true
-                ;;
-            0|*)
-                return
-                ;;
-        esac
-    fi
-
-    printf 'Enter 9Router port [default: %s]: ' "$NINEROUTER_PORT"
-    read -r requested_port
-
-    if [ -n "$requested_port" ]; then
-        NINEROUTER_PORT="$requested_port"
+    if [ -n "$_nr_port" ]; then
+        NINEROUTER_PORT="$_nr_port"
     fi
 
     case "$NINEROUTER_PORT" in
         ''|*[!0-9]*)
-            printf '%s[✗] Invalid port.%s\n' "$RED" "$NC"
-            return
+            fail "Invalid port."
+            return 1
             ;;
     esac
 
-    if [ "$NINEROUTER_PORT" -lt 1 ] ||
-       [ "$NINEROUTER_PORT" -gt 65535 ]; then
-
-        printf '%s[✗] Port must be between 1 and 65535.%s\n' \
-            "$RED" "$NC"
-
-        return
+    if [ "$NINEROUTER_PORT" -lt 1 ] || [ "$NINEROUTER_PORT" -gt 65535 ]; then
+        fail "Port must be between 1 and 65535."
+        return 1
     fi
 
-    printf 'Enter 9Router password [default: %s]: ' "$NINEROUTER_PASSWORD"
-    read -r requested_password
+    printf '  Password [%s]: ' "$NINEROUTER_PASSWORD"
+    read -r _nr_password
 
-    if [ -n "$requested_password" ]; then
-        NINEROUTER_PASSWORD="$requested_password"
+    if [ -n "$_nr_password" ]; then
+        NINEROUTER_PASSWORD="$_nr_password"
     fi
 
     save_config
+    return 0
+}
 
-    printf '%s[*] Pulling 9Router image...%s\n' "$BLUE" "$NC"
+print_router_urls() {
+    _nr_id="$(get_daytona_id)"
+    _nr_ip="$(get_container_ip "$NINEROUTER_CONTAINER")"
+    _nr_host="${_nr_ip:-localhost}"
+
+    printf '\n  Dashboard      %shttp://%s:%s%s\n' \
+        "$CYAN" "$_nr_host" "$NINEROUTER_PORT" "$NC"
+    printf '  Public         %shttps://%s-%s.proxy.daytona.work%s\n' \
+        "$CYAN" "$NINEROUTER_PORT" "$_nr_id" "$NC"
+    printf '  OpenAI API     %shttp://%s:%s/v1%s\n' \
+        "$CYAN" "$_nr_host" "$NINEROUTER_PORT" "$NC"
+    printf '                 %shttps://%s-%s.proxy.daytona.work/v1%s\n' \
+        "$CYAN" "$NINEROUTER_PORT" "$_nr_id" "$NC"
+}
+
+ninrouter_run() {
+    info "Pulling the 9Router image..."
 
     if ! docker pull "$NINEROUTER_IMAGE"; then
-        printf '%s[✗] Failed to pull 9Router image.%s\n' \
-            "$RED" "$NC"
-        return
+        fail "Failed to pull the 9Router image."
+        return 1
     fi
 
-    printf '%s[*] Starting 9Router...%s\n' "$BLUE" "$NC"
+    info "Starting 9Router..."
 
     if ! docker run -d \
         --name "$NINEROUTER_CONTAINER" \
@@ -728,44 +1016,160 @@ install_9router() {
         -e PORT=20128 \
         -e HOSTNAME=0.0.0.0 \
         -e INITIAL_PASSWORD="$NINEROUTER_PASSWORD" \
-        "$NINEROUTER_IMAGE"; then
+        "$NINEROUTER_IMAGE" >/dev/null; then
 
-        printf '%s[✗] Failed to start 9Router.%s\n' \
-            "$RED" "$NC"
-
-        return
+        fail "Failed to start 9Router."
+        return 1
     fi
 
     sleep 4
 
-    if container_running "$NINEROUTER_CONTAINER"; then
-        daytona_id="$(get_daytona_id)"
-
-        printf '%s[✓] 9Router is running.%s\n\n' \
-            "$GREEN" "$NC"
-
-        router_ip="$(get_container_ip "$NINEROUTER_CONTAINER")"
-        router_host="${router_ip:-localhost}"
-
-        printf '  Dashboard:\n'
-        printf '  %shttp://%s:%s%s\n\n' \
-            "$CYAN" "$router_host" "$NINEROUTER_PORT" "$NC"
-
-        printf '  Daytona public URL:\n'
-        printf '  %shttps://%s-%s.proxy.daytona.work%s\n\n' \
-            "$CYAN" "$NINEROUTER_PORT" "$daytona_id" "$NC"
-
-        printf '  OpenAI-compatible API:\n'
-        printf '  %shttp://%s:%s/v1%s\n' \
-            "$CYAN" "$router_host" "$NINEROUTER_PORT" "$NC"
-        printf '  %shttps://%s-%s.proxy.daytona.work/v1%s\n' \
-            "$CYAN" "$NINEROUTER_PORT" "$daytona_id" "$NC"
-    else
-        printf '%s[✗] 9Router stopped after startup.%s\n' \
-            "$RED" "$NC"
-
+    if ! container_running "$NINEROUTER_CONTAINER"; then
+        fail "9Router stopped after startup."
         docker logs --tail 50 "$NINEROUTER_CONTAINER" 2>&1 || true
+        return 1
     fi
+
+    print_router_urls
+    return 0
+}
+
+install_9router() {
+    clear_screen
+    screen_title "9Router · Install / Reconfigure"
+
+    if ! ensure_docker; then
+        return
+    fi
+
+    load_config
+
+    if container_exists "$NINEROUTER_CONTAINER"; then
+        if ! confirm_yes "9Router already exists. Reinstall it? Data in ${NINEROUTER_DATA_DIR} is kept."; then
+            warn "Cancelled."
+            return
+        fi
+
+        docker rm -f "$NINEROUTER_CONTAINER" >/dev/null 2>&1 || true
+    fi
+
+    if ! ninrouter_configure; then
+        return
+    fi
+
+    if ninrouter_run; then
+        ok "9Router is running."
+    fi
+}
+
+update_9router() {
+    clear_screen
+    screen_title "9Router · Update"
+
+    if ! ensure_docker; then
+        return
+    fi
+
+    load_config
+
+    if ! container_exists "$NINEROUTER_CONTAINER"; then
+        warn "9Router is not installed yet."
+        return
+    fi
+
+    docker rm -f "$NINEROUTER_CONTAINER" >/dev/null 2>&1 || true
+
+    if ninrouter_run; then
+        ok "9Router is updated to the latest image."
+    fi
+}
+
+uninstall_9router() {
+    clear_screen
+    screen_title "9Router · Uninstall"
+
+    if ! ensure_docker; then
+        return
+    fi
+
+    if container_exists "$NINEROUTER_CONTAINER"; then
+        if confirm_yes "Remove the 9Router container?"; then
+            docker rm -f "$NINEROUTER_CONTAINER" >/dev/null 2>&1 || true
+            ok "9Router container removed."
+        else
+            warn "Cancelled."
+            return
+        fi
+    else
+        warn "9Router is not installed."
+    fi
+
+    if [ -d "$NINEROUTER_DATA_DIR" ]; then
+        if confirm_no "Delete 9Router data (${NINEROUTER_DATA_DIR})?"; then
+            rm -rf "$NINEROUTER_DATA_DIR"
+            ok "9Router data deleted."
+        else
+            info "Data kept at ${NINEROUTER_DATA_DIR}."
+        fi
+    fi
+
+    if confirm_no "Remove the 9Router image?"; then
+        docker rmi "$NINEROUTER_IMAGE" >/dev/null 2>&1 || true
+        ok "Image removed."
+    fi
+}
+
+ninrouter_menu() {
+    while true; do
+        clear_screen
+        load_config
+
+        screen_title "9Router"
+
+        _nr_state="$(container_state "$NINEROUTER_CONTAINER")"
+        _nr_ip="$(get_container_ip "$NINEROUTER_CONTAINER")"
+
+        box_top
+        box_kv "  Status        " "$_nr_state" "$(state_color "$_nr_state")"
+        box_text "$DIM" "  Port          ${NINEROUTER_PORT}"
+
+        if [ -n "$_nr_ip" ]; then
+            box_text "$DIM" "  Local         http://${_nr_ip}:${NINEROUTER_PORT}"
+        fi
+
+        box_bottom
+
+        printf '\n'
+        menu_item 1 "Install / Reconfigure" "port, password"
+        menu_item 2 "Update" "pull the latest image, keep data"
+        menu_item 3 "Restart"
+        menu_item 4 "Stop"
+        menu_item 5 "Start"
+        menu_item 6 "Logs"
+        menu_item 7 "Shell"
+        menu_item 8 "Uninstall"
+
+        printf '\n'
+        menu_item 0 "Back"
+
+        printf '\n  Select [0-8]: '
+        read -r _nr_choice
+
+        case "$_nr_choice" in
+            1) install_9router ;;
+            2) update_9router ;;
+            3) service_restart "$NINEROUTER_CONTAINER" ;;
+            4) service_stop "$NINEROUTER_CONTAINER" ;;
+            5) service_start "$NINEROUTER_CONTAINER" ;;
+            6) show_logs_for "$NINEROUTER_CONTAINER" ;;
+            7) shell_into "$NINEROUTER_CONTAINER" ;;
+            8) uninstall_9router ;;
+            0) return ;;
+            *) fail "Invalid option." ;;
+        esac
+
+        pause_menu
+    done
 }
 
 # ------------------------------------------------------------------------------
@@ -803,84 +1207,58 @@ ensure_freellmapi_encryption_key() {
     return 0
 }
 
-install_freellmapi() {
-    clear_screen
-    printf '%s--- Install / Reconfigure FreeLLMAPI ---%s\n\n' \
-        "$BOLD" "$NC"
+freellmapi_configure() {
+    printf '\n  Port [%s]: ' "$FREELLMAPI_PORT"
+    read -r _fl_port
 
-    if ! ensure_docker; then
-        return
-    fi
-
-    load_config
-
-    if container_exists "$FREELLMAPI_CONTAINER"; then
-        printf '%s[!] FreeLLMAPI already exists.%s\n\n' "$YELLOW" "$NC"
-
-        printf '1. Restart\n'
-        printf '2. Reinstall / Reconfigure\n'
-        printf '0. Cancel\n\n'
-
-        printf 'Select [0-2]: '
-        read -r option
-
-        case "$option" in
-            1)
-                docker restart "$FREELLMAPI_CONTAINER" >/dev/null
-
-                printf '%s[✓] FreeLLMAPI restarted.%s\n' \
-                    "$GREEN" "$NC"
-
-                return
-                ;;
-            2)
-                docker rm -f "$FREELLMAPI_CONTAINER" \
-                    >/dev/null 2>&1 || true
-                ;;
-            0|*)
-                return
-                ;;
-        esac
-    fi
-
-    printf 'Enter FreeLLMAPI port [default: %s]: ' "$FREELLMAPI_PORT"
-    read -r requested_port
-
-    if [ -n "$requested_port" ]; then
-        FREELLMAPI_PORT="$requested_port"
+    if [ -n "$_fl_port" ]; then
+        FREELLMAPI_PORT="$_fl_port"
     fi
 
     case "$FREELLMAPI_PORT" in
         ''|*[!0-9]*)
-            printf '%s[✗] Invalid port.%s\n' "$RED" "$NC"
-            return
+            fail "Invalid port."
+            return 1
             ;;
     esac
 
-    if [ "$FREELLMAPI_PORT" -lt 1 ] ||
-       [ "$FREELLMAPI_PORT" -gt 65535 ]; then
-
-        printf '%s[✗] Port must be between 1 and 65535.%s\n' \
-            "$RED" "$NC"
-
-        return
+    if [ "$FREELLMAPI_PORT" -lt 1 ] || [ "$FREELLMAPI_PORT" -gt 65535 ]; then
+        fail "Port must be between 1 and 65535."
+        return 1
     fi
 
     if ! ensure_freellmapi_encryption_key; then
-        return
+        return 1
     fi
 
     save_config
+    return 0
+}
 
-    printf '%s[*] Pulling FreeLLMAPI image...%s\n' "$BLUE" "$NC"
+print_freellmapi_urls() {
+    _fl_id="$(get_daytona_id)"
+    _fl_ip="$(get_container_ip "$FREELLMAPI_CONTAINER")"
+    _fl_host="${_fl_ip:-localhost}"
+
+    printf '\n  Dashboard      %shttp://%s:%s%s\n' \
+        "$CYAN" "$_fl_host" "$FREELLMAPI_PORT" "$NC"
+    printf '  Public         %shttps://%s-%s.proxy.daytona.work%s\n' \
+        "$CYAN" "$FREELLMAPI_PORT" "$_fl_id" "$NC"
+    printf '  OpenAI API     %shttp://%s:%s/v1%s\n' \
+        "$CYAN" "$_fl_host" "$FREELLMAPI_PORT" "$NC"
+    printf '                 %shttps://%s-%s.proxy.daytona.work/v1%s\n' \
+        "$CYAN" "$FREELLMAPI_PORT" "$_fl_id" "$NC"
+}
+
+freellmapi_run() {
+    info "Pulling the FreeLLMAPI image..."
 
     if ! docker pull "$FREELLMAPI_IMAGE"; then
-        printf '%s[✗] Failed to pull FreeLLMAPI image.%s\n' \
-            "$RED" "$NC"
-        return
+        fail "Failed to pull the FreeLLMAPI image."
+        return 1
     fi
 
-    printf '%s[*] Starting FreeLLMAPI...%s\n' "$BLUE" "$NC"
+    info "Starting FreeLLMAPI..."
 
     if ! docker run -d \
         --name "$FREELLMAPI_CONTAINER" \
@@ -891,49 +1269,162 @@ install_freellmapi() {
         -e PORT=3001 \
         -e HOST_BIND=0.0.0.0 \
         -e ENCRYPTION_KEY="$FREELLMAPI_ENCRYPTION_KEY" \
-        "$FREELLMAPI_IMAGE"; then
+        "$FREELLMAPI_IMAGE" >/dev/null; then
 
-        printf '%s[✗] Failed to start FreeLLMAPI.%s\n' \
-            "$RED" "$NC"
-
-        return
+        fail "Failed to start FreeLLMAPI."
+        return 1
     fi
 
     sleep 6
 
-    if container_running "$FREELLMAPI_CONTAINER"; then
-        daytona_id="$(get_daytona_id)"
-
-        printf '%s[✓] FreeLLMAPI is running.%s\n\n' \
-            "$GREEN" "$NC"
-
-        freellmapi_ip="$(get_container_ip "$FREELLMAPI_CONTAINER")"
-        freellmapi_host="${freellmapi_ip:-localhost}"
-
-        printf '  Dashboard:\n'
-        printf '  %shttp://%s:%s%s\n\n' \
-            "$CYAN" "$freellmapi_host" "$FREELLMAPI_PORT" "$NC"
-
-        printf '  Daytona public URL:\n'
-        printf '  %shttps://%s-%s.proxy.daytona.work%s\n\n' \
-            "$CYAN" "$FREELLMAPI_PORT" "$daytona_id" "$NC"
-
-        printf '  OpenAI-compatible API:\n'
-        printf '  %shttp://%s:%s/v1%s\n' \
-            "$CYAN" "$freellmapi_host" "$FREELLMAPI_PORT" "$NC"
-        printf '  %shttps://%s-%s.proxy.daytona.work/v1%s\n\n' \
-            "$CYAN" "$FREELLMAPI_PORT" "$daytona_id" "$NC"
-
-        printf '  First run: open the dashboard and create the admin\n'
-        printf '  account (a one-time setup code is printed in the\n'
-        printf '  container logs — menu option 7). Add provider keys\n'
-        printf '  on the Keys page, then copy the unified API key.\n'
-    else
-        printf '%s[✗] FreeLLMAPI stopped after startup.%s\n' \
-            "$RED" "$NC"
-
+    if ! container_running "$FREELLMAPI_CONTAINER"; then
+        fail "FreeLLMAPI stopped after startup."
         docker logs --tail 50 "$FREELLMAPI_CONTAINER" 2>&1 || true
+        return 1
     fi
+
+    print_freellmapi_urls
+    return 0
+}
+
+install_freellmapi() {
+    clear_screen
+    screen_title "FreeLLMAPI · Install / Reconfigure"
+
+    if ! ensure_docker; then
+        return
+    fi
+
+    load_config
+
+    if container_exists "$FREELLMAPI_CONTAINER"; then
+        if ! confirm_yes "FreeLLMAPI already exists. Reinstall it? Data in ${FREELLMAPI_DATA_DIR} is kept."; then
+            warn "Cancelled."
+            return
+        fi
+
+        docker rm -f "$FREELLMAPI_CONTAINER" >/dev/null 2>&1 || true
+    fi
+
+    if ! freellmapi_configure; then
+        return
+    fi
+
+    if freellmapi_run; then
+        ok "FreeLLMAPI is running."
+        printf '  On first run, open the dashboard and create the admin\n'
+        printf '  account (the setup code is printed in the container logs).\n'
+    fi
+}
+
+update_freellmapi() {
+    clear_screen
+    screen_title "FreeLLMAPI · Update"
+
+    if ! ensure_docker; then
+        return
+    fi
+
+    load_config
+
+    if ! container_exists "$FREELLMAPI_CONTAINER"; then
+        warn "FreeLLMAPI is not installed yet."
+        return
+    fi
+
+    docker rm -f "$FREELLMAPI_CONTAINER" >/dev/null 2>&1 || true
+
+    if freellmapi_run; then
+        ok "FreeLLMAPI is updated to the latest image."
+    fi
+}
+
+uninstall_freellmapi() {
+    clear_screen
+    screen_title "FreeLLMAPI · Uninstall"
+
+    if ! ensure_docker; then
+        return
+    fi
+
+    if container_exists "$FREELLMAPI_CONTAINER"; then
+        if confirm_yes "Remove the FreeLLMAPI container?"; then
+            docker rm -f "$FREELLMAPI_CONTAINER" >/dev/null 2>&1 || true
+            ok "FreeLLMAPI container removed."
+        else
+            warn "Cancelled."
+            return
+        fi
+    else
+        warn "FreeLLMAPI is not installed."
+    fi
+
+    if [ -d "$FREELLMAPI_DATA_DIR" ]; then
+        if confirm_no "Delete FreeLLMAPI data (${FREELLMAPI_DATA_DIR})? This erases provider keys and settings."; then
+            rm -rf "$FREELLMAPI_DATA_DIR"
+            ok "FreeLLMAPI data deleted."
+        else
+            info "Data kept at ${FREELLMAPI_DATA_DIR}."
+        fi
+    fi
+
+    if confirm_no "Remove the FreeLLMAPI image?"; then
+        docker rmi "$FREELLMAPI_IMAGE" >/dev/null 2>&1 || true
+        ok "Image removed."
+    fi
+}
+
+freellmapi_menu() {
+    while true; do
+        clear_screen
+        load_config
+
+        screen_title "FreeLLMAPI"
+
+        _fl_state="$(container_state "$FREELLMAPI_CONTAINER")"
+        _fl_ip="$(get_container_ip "$FREELLMAPI_CONTAINER")"
+
+        box_top
+        box_kv "  Status        " "$_fl_state" "$(state_color "$_fl_state")"
+        box_text "$DIM" "  Port          ${FREELLMAPI_PORT}"
+
+        if [ -n "$_fl_ip" ]; then
+            box_text "$DIM" "  Local         http://${_fl_ip}:${FREELLMAPI_PORT}"
+        fi
+
+        box_bottom
+
+        printf '\n'
+        menu_item 1 "Install / Reconfigure" "port, encryption key"
+        menu_item 2 "Update" "pull the latest image, keep data"
+        menu_item 3 "Restart"
+        menu_item 4 "Stop"
+        menu_item 5 "Start"
+        menu_item 6 "Logs"
+        menu_item 7 "Shell"
+        menu_item 8 "Uninstall"
+
+        printf '\n'
+        menu_item 0 "Back"
+
+        printf '\n  Select [0-8]: '
+        read -r _fl_choice
+
+        case "$_fl_choice" in
+            1) install_freellmapi ;;
+            2) update_freellmapi ;;
+            3) service_restart "$FREELLMAPI_CONTAINER" ;;
+            4) service_stop "$FREELLMAPI_CONTAINER" ;;
+            5) service_start "$FREELLMAPI_CONTAINER" ;;
+            6) show_logs_for "$FREELLMAPI_CONTAINER" ;;
+            7) shell_into "$FREELLMAPI_CONTAINER" ;;
+            8) uninstall_freellmapi ;;
+            0) return ;;
+            *) fail "Invalid option." ;;
+        esac
+
+        pause_menu
+    done
 }
 
 # ------------------------------------------------------------------------------
@@ -972,10 +1463,14 @@ recreate_hermes_container() {
 
 set_hermes_api() {
     clear_screen
-    printf '%s--- Hermes API Configuration ---%s\n\n' \
-        "$BOLD" "$NC"
+    screen_title "Hermes API (Custom OpenAI-compatible endpoint)"
 
     load_config
+
+    printf '\n  %sHermes will use the "custom" provider: any OpenAI-compatible%s\n' \
+        "$DIM" "$NC"
+    printf '  %sendpoint works (9Router, FreeLLMAPI, OpenAI, Ollama, ...).%s\n' \
+        "$DIM" "$NC"
 
     printf 'Current endpoint:\n'
     printf '  %s%s%s\n\n' \
@@ -1104,73 +1599,138 @@ show_hermes_config() {
 }
 
 # ------------------------------------------------------------------------------
-# Container Logs
+# Service Lifecycle & Shell
 # ------------------------------------------------------------------------------
 
-show_logs() {
-    clear_screen
-    printf '%s--- Container Logs ---%s\n\n' "$BOLD" "$NC"
-
-    printf '1. Hermes\n'
-    printf '2. 9Router\n'
-    printf '3. FreeLLMAPI\n'
-    printf '0. Cancel\n\n'
-
-    printf 'Select [0-3]: '
-    read -r option
-
-    case "$option" in
-        1)
-            docker logs --tail 100 "$HERMES_CONTAINER" 2>&1
-            ;;
-        2)
-            docker logs --tail 100 "$NINEROUTER_CONTAINER" 2>&1
-            ;;
-        3)
-            docker logs --tail 100 "$FREELLMAPI_CONTAINER" 2>&1
-            ;;
-        0|*)
-            return
-            ;;
-    esac
-}
-
-# ------------------------------------------------------------------------------
-# Execute Command in Container
-# ------------------------------------------------------------------------------
-
-exec_in_container() {
-    clear_screen
-    printf '%s--- Execute Command in Container ---%s\n\n' "$BOLD" "$NC"
-
-    printf '1. Hermes\n'
-    printf '2. 9Router\n'
-    printf '3. FreeLLMAPI\n'
-    printf '0. Cancel\n\n'
-
-    printf 'Select [0-3]: '
-    read -r target_option
-
-    case "$target_option" in
-        1) target_container="$HERMES_CONTAINER" ;;
-        2) target_container="$NINEROUTER_CONTAINER" ;;
-        3) target_container="$FREELLMAPI_CONTAINER" ;;
-        0|*) return ;;
-    esac
-
-    if ! container_running "$target_container"; then
-        printf '\n%s[✗] Container %s is not running.%s\n' "$RED" "$target_container" "$NC"
+service_restart() {
+    if ! ensure_docker; then
         return
     fi
 
-    printf '\n%sOpening interactive shell in %s. Type "exit" to return to menu.%s\n\n' "$CYAN" "$target_container" "$NC"
-
-    # Prefer bash for full readline/arrow support; fall back to sh
-    if docker exec "$target_container" which bash >/dev/null 2>&1; then
-        docker exec -it "$target_container" bash
-    else
-        docker exec -it "$target_container" sh
+    if ! container_exists "$1"; then
+        warn "Container $1 does not exist."
+        return
     fi
+
+    if docker restart "$1" >/dev/null 2>&1; then
+        ok "$1 restarted."
+    else
+        fail "Failed to restart $1."
+    fi
+}
+
+service_stop() {
+    if ! ensure_docker; then
+        return
+    fi
+
+    if ! container_running "$1"; then
+        warn "Container $1 is not running."
+        return
+    fi
+
+    if docker stop "$1" >/dev/null 2>&1; then
+        ok "$1 stopped."
+    else
+        fail "Failed to stop $1."
+    fi
+}
+
+service_start() {
+    if ! ensure_docker; then
+        return
+    fi
+
+    if ! container_exists "$1"; then
+        warn "Container $1 does not exist."
+        return
+    fi
+
+    if docker start "$1" >/dev/null 2>&1; then
+        ok "$1 started."
+    else
+        fail "Failed to start $1."
+    fi
+}
+
+shell_into() {
+    _si_container="$1"
+
+    if ! container_running "$_si_container"; then
+        fail "Container $_si_container is not running."
+        return
+    fi
+
+    printf '\n  %sOpening a shell in %s. Type "exit" to return.%s\n\n' \
+        "$CYAN" "$_si_container" "$NC"
+
+    if docker exec "$_si_container" which bash >/dev/null 2>&1; then
+        docker exec -it "$_si_container" bash
+    else
+        docker exec -it "$_si_container" sh
+    fi
+}
+
+show_logs_for() {
+    if ! ensure_docker; then
+        return
+    fi
+
+    clear_screen
+    screen_title "Logs · $1"
+    printf '\n'
+
+    if ! container_exists "$1"; then
+        warn "Container $1 does not exist."
+        return
+    fi
+
+    docker logs --tail 100 "$1" 2>&1
+}
+
+# ------------------------------------------------------------------------------
+# Pick a Component
+# ------------------------------------------------------------------------------
+
+choose_container() {
+    printf '\n'
+    menu_item 1 "Hermes" "$(container_state "$HERMES_CONTAINER")"
+    menu_item 2 "9Router" "$(container_state "$NINEROUTER_CONTAINER")"
+    menu_item 3 "FreeLLMAPI" "$(container_state "$FREELLMAPI_CONTAINER")"
+    menu_item 4 "Xray" "$(container_state "$XRAY_CONTAINER")"
+    printf '\n'
+    menu_item 0 "Cancel"
+
+    printf '\n  Select [0-4]: '
+    read -r _cc
+
+    case "$_cc" in
+        1) printf '%s' "$HERMES_CONTAINER" ;;
+        2) printf '%s' "$NINEROUTER_CONTAINER" ;;
+        3) printf '%s' "$FREELLMAPI_CONTAINER" ;;
+        4) printf '%s' "$XRAY_CONTAINER" ;;
+        *) printf '' ;;
+    esac
+}
+
+show_logs() {
+    clear_screen
+    screen_title "Container Logs"
+
+    _sl_container="$(choose_container)"
+    [ -n "$_sl_container" ] || return
+
+    show_logs_for "$_sl_container"
+}
+
+exec_in_container() {
+    clear_screen
+    screen_title "Shell into a Container"
+
+    _ec_container="$(choose_container)"
+    [ -n "$_ec_container" ] || return
+
+    shell_into "$_ec_container"
 }
 
 # ------------------------------------------------------------------------------
@@ -2161,7 +2721,6 @@ xray_set_system_proxy() {
         printf '%s[!] Could not update %s or %s (root required).%s\n' \
             "$YELLOW" "$XRAY_PROFILE_FILE" "$XRAY_ENVIRONMENT_FILE" "$NC"
         printf '    The proxy is active for this script session only.\n\n'
-        return 1
     fi
 
     if [ "$_xp_env_ok" -eq 0 ]; then
@@ -2177,6 +2736,12 @@ xray_set_system_proxy() {
     printf '\n  %sApplied to this script and to every new shell.%s\n' "$CYAN" "$NC"
     printf '  %sApply it to the current terminal too with:%s\n' "$CYAN" "$NC"
     printf '    . %s\n\n' "$XRAY_PROFILE_FILE"
+
+    if enable_docker_proxy; then
+        printf '  %sDocker proxy set to %s (new containers are proxied).%s\n\n' \
+            "$CYAN" "$(docker_proxy_url)" "$NC"
+    fi
+
     return 0
 }
 
@@ -2190,6 +2755,7 @@ xray_unset_system_proxy() {
 
     xray_sync_environment_file off >/dev/null 2>&1 || true
     xray_apply_session_proxy off
+    disable_docker_proxy
 
     printf '%s[✓] System proxy disabled.%s\n' "$GREEN" "$NC"
     printf '  %sOpen a new terminal, or run "unset http_proxy https_proxy all_proxy"\n' "$CYAN"
@@ -2239,64 +2805,129 @@ xray_seconds_to_ms() {
     printf '%s' "$(( _st_int * 1000 + _st_frac ))"
 }
 
-# Probe google.com through the local HTTP inbound and compare with a direct call.
-xray_test_latency() {
-    if ! command -v curl >/dev/null 2>&1; then
-        printf '%s[✗] curl is not available in this sandbox.%s\n' "$RED" "$NC"
-        return 1
+# Milliseconds since boot, from /proc/uptime (10 ms resolution).
+xray_now_ms() {
+    if [ -r /proc/uptime ]; then
+        xray_seconds_to_ms "$(cut -d' ' -f1 /proc/uptime)"
+    else
+        printf '%s' "$(( $(date +%s) * 1000 ))"
+    fi
+}
+
+# Fetch a URL body through the local proxy, using curl or wget.
+xray_fetch_via_proxy() {
+    _fv_url="$1"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -s --proxy "$XRAY_PROXY_URL" \
+            --connect-timeout 10 --max-time 20 "$_fv_url" 2>/dev/null || true
+        return 0
     fi
 
+    if command -v wget >/dev/null 2>&1; then
+        http_proxy="$XRAY_PROXY_URL" https_proxy="$XRAY_PROXY_URL" \
+            wget -q -O - -T 20 "$_fv_url" 2>/dev/null || true
+    fi
+}
+
+# xray_probe <url> <proxy|direct> -> "<http_code> <ms>" on success.
+# Returns 1 when the request failed, 2 when neither curl nor wget exists.
+xray_probe() {
+    _pr_url="$1"
+    _pr_mode="$2"
+
+    if command -v curl >/dev/null 2>&1; then
+        if [ "$_pr_mode" = "proxy" ]; then
+            _pr_raw="$(curl -s -o /dev/null --proxy "$XRAY_PROXY_URL" \
+                --connect-timeout 10 --max-time 25 \
+                -w '%{http_code} %{time_total}' "$_pr_url" 2>/dev/null)"
+        else
+            _pr_raw="$(curl -s -o /dev/null --noproxy '*' \
+                --connect-timeout 10 --max-time 25 \
+                -w '%{http_code} %{time_total}' "$_pr_url" 2>/dev/null)"
+        fi
+
+        if [ $? -ne 0 ]; then
+            return 1
+        fi
+
+        _pr_code="${_pr_raw%% *}"
+        _pr_total="${_pr_raw#* }"
+        _pr_total="${_pr_total%% *}"
+
+        printf '%s %s' "$_pr_code" "$(xray_seconds_to_ms "$_pr_total")"
+        return 0
+    fi
+
+    if command -v wget >/dev/null 2>&1; then
+        _pr_hdr="/tmp/hermes-xray-probe.$$"
+        _pr_body="/tmp/hermes-xray-body.$$"
+        _pr_t0="$(xray_now_ms)"
+
+        if [ "$_pr_mode" = "proxy" ]; then
+            http_proxy="$XRAY_PROXY_URL" https_proxy="$XRAY_PROXY_URL" \
+                wget -S -O "$_pr_body" -T 25 "$_pr_url" 2>"$_pr_hdr"
+        else
+            env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
+                -u all_proxy -u ALL_PROXY \
+                wget -S -O "$_pr_body" -T 25 "$_pr_url" 2>"$_pr_hdr"
+        fi
+
+        _pr_rc=$?
+        _pr_t1="$(xray_now_ms)"
+        rm -f "$_pr_body"
+
+        _pr_code="$(sed -n \
+            's/^[[:space:]]*HTTP\/[0-9.]*[[:space:]]\{1,\}\([0-9][0-9][0-9]\).*/\1/p' \
+            "$_pr_hdr" | tail -n 1)"
+        rm -f "$_pr_hdr"
+
+        if [ "$_pr_rc" -ne 0 ]; then
+            return 1
+        fi
+
+        printf '%s %s' "${_pr_code:-000}" "$(( _pr_t1 - _pr_t0 ))"
+        return 0
+    fi
+
+    return 2
+}
+
+# Probe a URL through the local HTTP inbound and compare with a direct call.
+xray_test_latency() {
     if ! xray_core_running; then
-        printf '%s[✗] The Xray core is not running. Start it first (option 5).%s\n' \
-            "$RED" "$NC"
+        fail "The Xray core is not running. Start it first."
         return 1
     fi
 
     printf '\n%s[*] Testing %s through %s...%s\n\n' \
         "$BOLD" "$XRAY_TEST_URL" "$XRAY_PROXY_URL" "$NC"
 
-    _xt_result="$(curl -s -o /dev/null \
-        --proxy "$XRAY_PROXY_URL" \
-        --connect-timeout 10 \
-        --max-time 25 \
-        -w '%{http_code} %{time_total}' \
-        "$XRAY_TEST_URL" 2>&1)"
+    _xt_result="$(xray_probe "$XRAY_TEST_URL" proxy)"
     _xt_status=$?
 
+    if [ "$_xt_status" -eq 2 ]; then
+        fail "Neither curl nor wget is available in this sandbox."
+        return 1
+    fi
+
     if [ "$_xt_status" -ne 0 ]; then
-        printf '%s[✗] Proxy request failed.%s\n' "$RED" "$NC"
-
-        if [ -n "$_xt_result" ]; then
-            printf '  %s%s%s\n' "$YELLOW" "$_xt_result" "$NC"
-        fi
-
+        fail "Proxy request failed."
         printf '  The core is up, but the node is down, blocked or misconfigured.\n'
         return 1
     fi
 
     _xt_code="${_xt_result%% *}"
-    _xt_total="${_xt_result#* }"
-    _xt_total="${_xt_total%% *}"
-    _xt_ms="$(xray_seconds_to_ms "$_xt_total")"
+    _xt_ms="${_xt_result#* }"
 
-    _xt_ip="$(curl -s \
-        --proxy "$XRAY_PROXY_URL" \
-        --connect-timeout 10 \
-        --max-time 20 \
-        "$XRAY_TEST_IP_URL" 2>/dev/null || true)"
+    _xt_ip="$(xray_fetch_via_proxy "$XRAY_TEST_IP_URL" | tr -d '\r\n')"
 
-    _xt_direct="$(curl -s -o /dev/null \
-        --noproxy '*' \
-        --connect-timeout 10 \
-        --max-time 25 \
-        -w '%{time_total}' \
-        "$XRAY_TEST_URL" 2>/dev/null || true)"
-
+    _xt_direct_result="$(xray_probe "$XRAY_TEST_URL" direct)"
     _xt_direct_ms=""
     _xt_delta=""
 
-    if [ -n "$_xt_direct" ]; then
-        _xt_direct_ms="$(xray_seconds_to_ms "$_xt_direct")"
+    if [ -n "$_xt_direct_result" ]; then
+        _xt_direct_ms="${_xt_direct_result#* }"
         _xt_delta="$(( _xt_ms - _xt_direct_ms ))"
 
         if [ "$_xt_delta" -lt 0 ]; then
@@ -2443,12 +3074,76 @@ xray_toggle_proxy() {
     fi
 
     if ! xray_core_running; then
-        printf '%s[!] The Xray core is not running, traffic stays blocked until it starts.%s\n' \
-            "$YELLOW" "$NC"
+        warn "The Xray core is not running; traffic stays blocked until it starts."
     fi
 
     xray_set_system_proxy
     return 0
+}
+
+update_xray() {
+    clear_screen
+    screen_title "Xray · Update"
+
+    if ! ensure_docker; then
+        return
+    fi
+
+    info "Pulling the latest Xray image..."
+
+    if ! docker pull "$XRAY_IMAGE"; then
+        fail "Failed to pull the Xray image."
+        return
+    fi
+
+    if xray_core_installed; then
+        if xray_core_create; then
+            ok "Xray core updated and running."
+        fi
+    else
+        ok "Xray image updated."
+    fi
+}
+
+uninstall_xray() {
+    clear_screen
+    screen_title "Xray · Uninstall"
+
+    if ! ensure_docker; then
+        return
+    fi
+
+    if xray_proxy_enabled; then
+        xray_unset_system_proxy >/dev/null 2>&1 || true
+    fi
+
+    if container_exists "$XRAY_CONTAINER"; then
+        if confirm_yes "Remove the Xray container?"; then
+            docker rm -f "$XRAY_CONTAINER" >/dev/null 2>&1 || true
+            ok "Xray container removed."
+        else
+            warn "Cancelled."
+            return
+        fi
+    else
+        warn "Xray is not installed."
+    fi
+
+    if [ -d "$XRAY_DATA_DIR" ]; then
+        if confirm_no "Delete the Xray config and node link (${XRAY_DATA_DIR})?"; then
+            rm -rf "$XRAY_DATA_DIR"
+            XRAY_NODE_LABEL=""
+            save_config
+            ok "Xray config deleted."
+        else
+            info "Config kept at ${XRAY_DATA_DIR}."
+        fi
+    fi
+
+    if confirm_no "Remove the Xray image?"; then
+        docker rmi "$XRAY_IMAGE" >/dev/null 2>&1 || true
+        ok "Image removed."
+    fi
 }
 
 # ------------------------------------------------------------------------------
@@ -2460,141 +3155,265 @@ xray_menu() {
         clear_screen
         load_config
 
-        if xray_core_running; then
-            xray_core_state="${GREEN}Running${NC}"
-        elif xray_core_installed; then
-            xray_core_state="${YELLOW}Stopped${NC}"
+        screen_title "Xray Proxy"
+
+        _xr_state="$(container_state "$XRAY_CONTAINER")"
+
+        if xray_proxy_enabled; then _xr_proxy="enabled"; else _xr_proxy="disabled"; fi
+        if docker_proxy_enabled; then _xr_dproxy="enabled"; else _xr_dproxy="disabled"; fi
+
+        box_top
+        box_kv "  Core          " "$_xr_state" "$(state_color "$_xr_state")"
+
+        if [ "$_xr_proxy" = "enabled" ]; then
+            box_kv "  System proxy  " "$_xr_proxy" "$GREEN"
         else
-            xray_core_state="${RED}Not installed${NC}"
+            box_kv "  System proxy  " "$_xr_proxy" "$YELLOW"
         fi
 
-        if xray_proxy_enabled; then
-            xray_proxy_state="${GREEN}Enabled${NC}"
+        if [ "$_xr_dproxy" = "enabled" ]; then
+            box_kv "  Docker proxy  " "$_xr_dproxy" "$GREEN"
         else
-            xray_proxy_state="${YELLOW}Disabled${NC}"
+            box_kv "  Docker proxy  " "$_xr_dproxy" "$YELLOW"
         fi
 
-        printf '%s--- Xray Proxy ---%s\n\n' "$BOLD" "$NC"
-
-        printf '  Core:          %s\n' "$xray_core_state"
-        printf '  System proxy:  %s\n' "$xray_proxy_state"
-
-        if [ -n "$XRAY_NODE_LABEL" ]; then
-            printf '  Node:          %s%s%s\n' \
-                "$CYAN" "$XRAY_NODE_LABEL" "$NC"
-        else
-            printf '  Node:          %snone%s\n' "$YELLOW" "$NC"
-        fi
+        box_text "$DIM" "  Node          ${XRAY_NODE_LABEL:-none}"
 
         if [ -f "$XRAY_CONFIG_FILE" ]; then
-            printf '  SOCKS:         %s%s%s\n' "$CYAN" "$XRAY_SOCKS_URL" "$NC"
-            printf '  HTTP:          %s%s%s\n' "$CYAN" "$XRAY_PROXY_URL" "$NC"
+            box_text "$DIM" "  SOCKS / HTTP  ${XRAY_SOCKS_URL} / ${XRAY_PROXY_URL}"
         fi
 
-        printf '\n'
-        printf '1. Add / Change node link\n'
-        printf '2. Pause / Resume system proxy\n'
-        printf '\n'
-        printf '3. Restart core\n'
-        printf '4. Stop core\n'
-        printf '5. Start core\n'
-        printf '\n'
-        printf '6. Test proxy latency\n'
-        printf '7. Show Xray logs\n'
-        printf '8. Show Xray client config\n'
-        printf '\n'
-        printf '0. Back\n'
+        box_bottom
 
-        printf '\n%s───────────────────────────────────────────────────────────────────────────%s\n\n' \
-            "$CYAN" "$NC"
+        printf '\n'
+        menu_item 1 "Add / change node link"
+        menu_item 2 "Pause / resume system proxy" "host shells + new containers"
+        menu_item 3 "Toggle Docker proxy" "proxy for newly created containers"
+        menu_item 4 "Restart core"
+        menu_item 5 "Stop core"
+        menu_item 6 "Start core"
+        menu_item 7 "Update core image"
+        menu_item 8 "Test proxy latency"
+        menu_item 9 "Show logs"
+        menu_item 10 "Show client config"
+        menu_item 11 "Uninstall"
 
-        printf 'Select an option [0-8]: '
-        read -r xray_choice
+        printf '\n'
+        menu_item 0 "Back"
 
-        case "$xray_choice" in
+        printf '\n  Select [0-11]: '
+        read -r _xr_choice
+
+        case "$_xr_choice" in
             1) xray_add_node ;;
             2) xray_toggle_proxy ;;
             3)
-                if ensure_docker && xray_core_restart; then
-                    printf '\n%s[✓] Xray core restarted.%s\n' "$GREEN" "$NC"
+                if docker_proxy_enabled; then
+                    disable_docker_proxy
+                    ok "Docker proxy disabled."
+                elif enable_docker_proxy; then
+                    ok "Docker proxy enabled for new containers."
                 fi
                 ;;
             4)
+                if ensure_docker && xray_core_restart; then
+                    ok "Xray core restarted."
+                fi
+                ;;
+            5)
                 if ensure_docker; then
                     xray_core_stop
                 fi
                 ;;
-            5)
+            6)
                 if ensure_docker && xray_core_start; then
-                    printf '\n%s[✓] Xray core is running.%s\n' "$GREEN" "$NC"
+                    ok "Xray core is running."
                 fi
                 ;;
-            6) xray_test_latency ;;
-            7)
-                if ensure_docker && xray_core_installed; then
-                    docker logs --tail 100 "$XRAY_CONTAINER" 2>&1
-                fi
-                ;;
-            8) xray_show_config ;;
+            7) update_xray ;;
+            8) xray_test_latency ;;
+            9) show_logs_for "$XRAY_CONTAINER" ;;
+            10) xray_show_config ;;
+            11) uninstall_xray ;;
             0) return ;;
-            *) printf '%s[✗] Invalid option.%s\n' "$RED" "$NC" ;;
+            *) fail "Invalid option." ;;
         esac
 
-        printf '\nPress Enter to return to the Xray menu...'
-        read -r xray_dummy
+        pause_menu
     done
 }
 
 # ------------------------------------------------------------------------------
-# Main Menu Loop
+# Manager Settings
 # ------------------------------------------------------------------------------
+
+show_manager_config() {
+    clear_screen
+    screen_title "Manager Configuration"
+
+    load_config
+
+    _cmd_path="$(cli_command_path)"
+
+    printf '\n'
+    printf '  %-22s %s\n' "Config file" "$CONFIG_FILE"
+    printf '  %-22s %s\n' "CLI command" "${_cmd_path:-not on PATH}"
+    printf '  %-22s %s\n' "Hermes API URL" "${HERMES_API_URL:-not set}"
+    printf '  %-22s %s\n' "Hermes API token" "$(redact_secret "${HERMES_API_TOKEN:-}")"
+    printf '  %-22s %s\n' "Telegram token" "$(redact_secret "${TELEGRAM_BOT_TOKEN:-}")"
+    printf '  %-22s %s\n' "Telegram users" "${TELEGRAM_ALLOWED_USERS:-not set}"
+    printf '  %-22s %s\n' "Hermes model" "$HERMES_MODEL"
+    printf '  %-22s %s\n' "9Router port" "$NINEROUTER_PORT"
+    printf '  %-22s %s\n' "FreeLLMAPI port" "$FREELLMAPI_PORT"
+    printf '  %-22s %s\n' "Xray node" "${XRAY_NODE_LABEL:-not set}"
+    printf '\n'
+}
+
+reset_all_data() {
+    clear_screen
+    screen_title "Reset All Data"
+
+    warn "This removes every container, image and data directory managed here."
+
+    printf '\n  %s\n' "$HERMES_DATA_DIR"
+    printf '  %s\n' "$NINEROUTER_DATA_DIR"
+    printf '  %s\n' "$FREELLMAPI_DATA_DIR"
+    printf '  %s\n' "$XRAY_DATA_DIR"
+
+    if ! confirm_no "Really continue?"; then
+        warn "Cancelled."
+        return
+    fi
+
+    if ! confirm_no "This cannot be undone. Delete everything?"; then
+        warn "Cancelled."
+        return
+    fi
+
+    if docker_ready; then
+        if xray_proxy_enabled; then
+            xray_unset_system_proxy >/dev/null 2>&1 || true
+        fi
+
+        for _ra_container in \
+            "$HERMES_CONTAINER" "$NINEROUTER_CONTAINER" \
+            "$FREELLMAPI_CONTAINER" "$XRAY_CONTAINER"; do
+
+            docker rm -f "$_ra_container" >/dev/null 2>&1 || true
+        done
+
+        for _ra_image in \
+            "hermes-agent:latest" "$NINEROUTER_IMAGE" \
+            "$FREELLMAPI_IMAGE" "$XRAY_IMAGE"; do
+
+            docker rmi "$_ra_image" >/dev/null 2>&1 || true
+        done
+    fi
+
+    disable_docker_proxy
+    rm -f "$CONFIG_FILE"
+    rm -rf "$HERMES_DATA_DIR" "$NINEROUTER_DATA_DIR" \
+        "$FREELLMAPI_DATA_DIR" "$XRAY_DATA_DIR" "$HERMES_REPO_DIR"
+
+    ok "All managed data removed."
+}
+
+manager_menu() {
+    while true; do
+        clear_screen
+        load_config
+
+        screen_title "Manager Settings"
+
+        if docker_proxy_enabled; then _mg_dproxy="enabled"; else _mg_dproxy="disabled"; fi
+
+        printf '\n'
+        menu_item 1 "Update manager" "re-download install.sh"
+        menu_item 2 "Reinstall CLI command" "write ${CLI_COMMAND} to PATH"
+        menu_item 3 "Docker proxy (${_mg_dproxy})" "proxy for new containers"
+        menu_item 4 "Show manager config"
+        menu_item 5 "Reset all data" "destructive"
+
+        printf '\n'
+        menu_item 0 "Back"
+
+        printf '\n  Select [0-5]: '
+        read -r _mg_choice
+
+        case "$_mg_choice" in
+            1) update_manager ;;
+            2)
+                if install_cli_command; then
+                    ok "Installed: $(cli_command_path)"
+                else
+                    fail "Could not install ${CLI_COMMAND} (need a writable dir on PATH)."
+                fi
+                ;;
+            3)
+                if docker_proxy_enabled; then
+                    disable_docker_proxy
+                    ok "Docker proxy disabled."
+                elif enable_docker_proxy; then
+                    ok "Docker proxy enabled. Recreate containers to apply it."
+                fi
+                ;;
+            4) show_manager_config ;;
+            5) reset_all_data ;;
+            0) return ;;
+            *) fail "Invalid option." ;;
+        esac
+
+        pause_menu
+    done
+}
+
+# ------------------------------------------------------------------------------
+# Main Menu
+# ------------------------------------------------------------------------------
+
+install_cli_command >/dev/null 2>&1 || true
 
 while true; do
     clear_screen
+    render_dashboard
 
-    render_banner
-    render_status
+    section "Setup"
+    menu_item 1 "Hermes" "install · rebuild · update"
+    menu_item 2 "9Router" "install · update · reconfigure"
+    menu_item 3 "FreeLLMAPI" "install · update · reconfigure"
+    menu_item 4 "Xray proxy" "node · system proxy · core"
 
-    printf '%s───────────────────────────────────────────────────────────────────────────%s\n' \
-        "$CYAN" "$NC"
+    section "Manage"
+    menu_item 5 "Hermes API endpoint & token"
+    menu_item 6 "Telegram bot & allowed users"
+    menu_item 7 "Hermes configuration"
+    menu_item 8 "Container logs"
+    menu_item 9 "Shell into a container"
+    menu_item 10 "Manager settings"
 
     printf '\n'
-    printf '1. Install / Reinstall Hermes\n'
-    printf '2. Install / Reconfigure 9Router\n'
-    printf '3. Install / Reconfigure FreeLLMAPI\n'
-    printf '\n'
-    printf '4. Set Hermes API endpoint and token\n'
-    printf '5. Set Hermes Telegram bot token and allowed users\n'
-    printf '\n'
-    printf '6. Show Hermes configuration\n'
-    printf '7. Show container logs\n'
-    printf '\n'
-    printf '8. Execute command inside container\n'
-    printf '\n'
-    printf '9. Xray proxy (node / system proxy / core / latency)\n'
-    printf '\n'
-    printf '0. Exit\n'
+    menu_item 0 "Exit"
 
-    printf '\n%s───────────────────────────────────────────────────────────────────────────%s\n\n' \
-        "$CYAN" "$NC"
-
-    printf 'Select an option [0-9]: '
+    printf '\n  Select [0-10]: '
     read -r choice
 
     case "$choice" in
-        1) install_hermes ;;
-        2) install_9router ;;
-        3) install_freellmapi ;;
-        4) set_hermes_api ;;
-        5) set_telegram ;;
-        6) show_hermes_config ;;
-        7) show_logs ;;
-        8) exec_in_container ;;
-        9) xray_menu ;;
-        0) printf '%sExiting.%s\n' "$GREEN" "$NC"; exit 0 ;;
-        *) printf '%s[✗] Invalid option.%s\n' "$RED" "$NC" ;;
+        1) hermes_menu ;;
+        2) ninrouter_menu ;;
+        3) freellmapi_menu ;;
+        4) xray_menu ;;
+        5) set_hermes_api ;;
+        6) set_telegram ;;
+        7) show_hermes_config ;;
+        8) show_logs ;;
+        9) exec_in_container ;;
+        10) manager_menu ;;
+        0) printf '\n  %sBye.%s\n' "$GREEN" "$NC"; exit 0 ;;
+        *) fail "Invalid option." ;;
     esac
 
-    printf '\nPress Enter to return to the menu...'
-    read -r dummy
+    case "$choice" in
+        1|2|3|4|10|0) ;;
+        *) pause_menu ;;
+    esac
 done
